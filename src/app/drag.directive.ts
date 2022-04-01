@@ -280,14 +280,62 @@ export class DragDirective implements OnDestroy {
                       0,
                       self.containerEle.clientWidth - 1
                     );
-                    // BxxB--P
-                    // 2345678
                     actualXAdj = newRight - self.frameX + 1 - self.frameWidth;
 
                     newWidth = Math.max(
                       self.frameWidth + actualXAdj,
                       self.appDragMinWidth
                     );
+                    break;
+                  case 'resize-se':
+                    // Resizing southeast. Grow the bottom and right edges.
+                    newBottom = self.Clamp(
+                      self.frameY + self.frameHeight - 1 + dy,
+                      self.frameY + self.appDragMinHeight - 1,
+                      self.containerEle.clientHeight - 1
+                    );
+
+                    newHeight = newBottom - self.frameY + 1;
+
+                    newRight = self.Clamp(
+                      self.frameX + self.frameWidth - 1 + dx,
+                      self.frameX + self.appDragMinWidth - 1,
+                      self.containerEle.clientWidth - 1
+                    );
+
+                    newWidth = newRight - self.frameX + 1;
+
+                    // Top/left does not change, only height and width.
+                    break;
+                  case 'resize-s':
+                    // Resizing south. Grow the bottom edge.
+                    newBottom = self.Clamp(
+                      self.frameY + self.frameHeight - 1 + dy,
+                      self.frameY + self.appDragMinHeight - 1,
+                      self.containerEle.clientHeight - 1
+                    );
+
+                    newHeight = newBottom - self.frameY + 1;
+                    break;
+                  case 'resize-sw':
+                    // Resizing southwest. Grow the bottom and left edges.
+                    newBottom = self.Clamp(
+                      self.frameY + self.frameHeight - 1 + dy,
+                      self.frameY + self.appDragMinHeight - 1,
+                      self.containerEle.clientHeight - 1
+                    );
+
+                    newHeight = newBottom - self.frameY + 1;
+
+                    newRight = self.frameX + self.frameWidth - 1;
+                    newLeft = self.Clamp(
+                      self.frameX + dx,
+                      0,
+                      newRight - self.appDragMinWidth + 1
+                    );
+
+                    newWidth = newRight - newLeft + 1;
+                    px = newLeft;
                     break;
                   case 'resize-e':
                     // Resizing east. Grow only the right edge of the frame.
@@ -311,25 +359,54 @@ export class DragDirective implements OnDestroy {
                     break;
                   case 'resize-w':
                     // Resizing west. Grow only the left edge of the frame.
+                    newRight = self.frameX + self.frameWidth - 1;
                     newLeft = self.Clamp(
                       self.frameX + dx,
                       0,
-                      self.containerEle.clientWidth - 1
+                      newRight - self.appDragMinWidth + 1
                     );
-                    actualXAdj = self.frameX - newLeft;
-                    newWidth = self.frameWidth + actualXAdj;
 
-                    // Is this new width below the allowed minimum for the drag frame? If so, put the new width back to the min allowed, and
-                    // recalculate the newLeft.
-                    if (newWidth < self.appDragMinWidth) {
-                      newWidth = self.appDragMinWidth;
-                      newLeft = self.frameX + self.frameWidth - newWidth;
-                    }
+                    newWidth = newRight - newLeft + 1;
                     px = newLeft;
 
                     // No change in y/top coord or height.
                     py = self.frameY;
                     newHeight = self.frameHeight;
+                    break;
+                  case 'resize-nw':
+                    // Resizing northwest. Grow only the top and left edges of the frame.
+
+                    newBottom = self.frameY + self.frameHeight - 1;
+                    newTop = self.Clamp(
+                      self.frameY + dy,
+                      0,
+                      newBottom - self.appDragMinHeight + 1
+                    );
+
+                    newHeight = newBottom - newTop + 1;
+                    py = newTop;
+
+                    newRight = self.frameX + self.frameWidth - 1;
+                    newLeft = self.Clamp(
+                      self.frameX + dx,
+                      0,
+                      newRight - self.appDragMinWidth + 1
+                    );
+
+                    newWidth = newRight - newLeft + 1;
+                    px = newLeft;
+                    break;
+                  case 'resize-n':
+                    // Resizing north. Grow only the top edge of the frame.
+                    newBottom = self.frameY + self.frameHeight - 1;
+                    newTop = self.Clamp(
+                      self.frameY + dy,
+                      0,
+                      newBottom - self.appDragMinHeight + 1
+                    );
+
+                    newHeight = newBottom - newTop + 1;
+                    py = newTop;
                     break;
                 }
 

@@ -1,0 +1,106 @@
+.outerbox {
+  display: block;
+  position: absolute;
+  width: 550px;
+  height: 500px;
+  border: 2px solid black;
+  left: 150px;
+  top: 150px;
+  box-sizing: border-box;
+}
+
+.dragframe {
+  box-sizing: border-box;
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 100px;
+  height: 100px;
+  border: 1px solid red;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+}
+
+.center-drag {
+  .mat-icon {
+    color: black;
+    cursor: move;
+  }
+}
+
+$drag-handle-size: 4px;
+
+.ne-drag,
+.se-drag,
+.sw-drag,
+.nw-drag,
+.n-drag,
+.e-drag,
+.s-drag,
+.w-drag {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+}
+
+.ne-drag,
+.n-drag,
+.nw-drag {
+  border-top: $drag-handle-size solid red;
+  top: 0px;
+}
+
+.ne-drag,
+.e-drag,
+.se-drag {
+  border-right: $drag-handle-size solid red;
+  right: 0px;
+}
+
+.se-drag,
+.s-drag,
+.sw-drag {
+  border-bottom: $drag-handle-size solid red;
+  bottom: 0px;
+}
+
+.sw-drag,
+.w-drag,
+.nw-drag {
+  border-left: $drag-handle-size solid red;
+  left: 0px;
+}
+
+.ne-drag {
+  cursor: ne-resize;
+}
+
+.e-drag {
+  cursor: e-resize;
+}
+
+.se-drag {
+  cursor: se-resize;
+}
+
+.s-drag {
+  cursor: s-resize;
+}
+
+.sw-drag {
+  cursor: sw-resize;
+}
+
+.w-drag {
+  cursor: w-resize;
+}
+
+.nw-drag {
+  cursor: nw-resize;
+}
+
+.n-drag {
+  cursor: n-resize;
+}

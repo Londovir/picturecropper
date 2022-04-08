@@ -70,12 +70,24 @@ export class DragDirective implements OnDestroy {
   // Properties used in the drag/resize operation.
   private frameRect: DOMRect;
   private containerRect: DOMRect;
-  private originX: number;
-  private originY: number;
-  private frameX: number;
-  private frameY: number;
-  private frameWidth: number;
-  private frameHeight: number;
+  private dragZone: Rectangle = { x1: 0, y1: 0, x2: 0, y2: 0 };
+  private frameStart: FramePosition = {
+    Left: 0,
+    Top: 0,
+    Right: 0,
+    Bottom: 0,
+    Width: 0,
+    Height: 0,
+  };
+  private parentStart: FramePosition = {
+    Left: 0,
+    Top: 0,
+    Right: 0,
+    Bottom: 0,
+    Width: 0,
+    Height: 0,
+  };
+  private cursorStart: CursorPosition = { x: 0, y: 0 };
   private aspectX = 0;
   private aspectY = 0;
   private aspectLocked = false;
@@ -88,17 +100,14 @@ export class DragDirective implements OnDestroy {
     this.containerRect = this.containerEle.getBoundingClientRect(); // This contains info on the size and position of the container of the drag frame element.
 
     // Simpler breakouts.
-    [this.frameWidth, this.frameHeight] = [
-      this.frameEle.offsetWidth,
-      this.frameEle.offsetHeight,
-    ]; // Capture the width and height of the drag frame.
-
-    [this.frameX, this.frameY] = [
-      this.frameEle.offsetLeft,
-      this.frameEle.offsetTop,
-    ]; // Capture the drag frame's starting/current (x,y) location relative to the container.
-
-    [this.originX, this.originY] = [0, 0]; // Initialize the drag/resize handle origin point to defaults for now.
+    this.frameStart = {
+      Top: this.frameEle.offsetTop,
+      Left: this.frameEle.offsetLeft,
+      Right: this.frameEle.offsetTop + this.frameEle.offsetWidth - 1,
+      Bottom: this.frameEle.offsetTop + this.frameEle.offsetHeight - 1,
+      Width: this.frameEle.offsetWidth,
+      Height: this.frameEle.offsetHeight,
+    }; // Capture the width and height of the drag frame.
 
     // Determine if we are using an aspect ratio for this operation (assuming it will be a resize, at least).
     this.aspectLocked = !!this.appDragAspectRatio;
@@ -407,10 +416,39 @@ export class DragDirective implements OnDestroy {
           // This will provide an offset that the drag handle has moved, which is also the amount we need to move the drag frame by.
           // We begin by storing the current coords of the drag handle for use in these calculations. We also need to store the starting coords
           // of the drag frame, which is what we use to determine its new positions during the drag.
-          self.originX = d.Event?.pageX ?? 0;
-          self.originY = d.Event?.pageY ?? 0;
-          self.frameX = self.frameEle.offsetLeft;
-          self.frameY = self.frameEle.offsetTop;
+          self.cursorStart = {
+            x: d.Event?.clientX ?? 0,
+            y: d.Event?.clientY ?? 0,
+          };
+          self.frameStart = {
+            Left: self.frameEle.offsetLeft,
+            Top: self.frameEle.offsetTop,
+            Right: self.frameStart.Left + self.frameEle.offsetWidth - 1,
+            Bottom: self.frameStart.Top + self.frameEle.offsetHeight - 1,
+            Width: self.frameEle.offsetWidth,
+            Height: self.frameEle.offsetHeight,
+          };
+
+          // Set parent info.
+          const parInfo = self.containerEle.getBoundingClientRect();
+          self.parentStart = {
+            Top: parInfo.top,
+            Left: parInfo.left,
+            Right: parInfo.right,
+            Bottom: parInfo.bottom,
+            Width: self.containerEle.clientWidth,
+            Height: self.containerEle.clientHeight,
+          };
+
+          // Set drag zone
+          const frameCx = self.frameStart.Width / 2;
+          const frameCy = self.frameStart.Height / 2;
+          self.dragZone = {
+            x1: self.parentStart.Left + frameCx - 1,
+            y1: self.parentStart.Top + frameCy - 1,
+            x2: self.parentStart.Right - frameCx + 1,
+            y2: self.parentStart.Bottom - frameCy + 1,
+          };
         }),
         // Use switchMap to change over from working with mousedown observables to working with mousemove observables, so we
         // can track the progress of the mouse cursor as we're engaged in this drag/resize.
@@ -423,10 +461,10 @@ export class DragDirective implements OnDestroy {
               $mouseup!.pipe(
                 tap((event) => {
                   // If this was a resize operation, now that we're done we need to lock in the new width/height of the drag frame.
-                  if (self.ActiveHandle?.appDragHandle !== 'move') {
-                    self.frameWidth = self.frameEle.offsetWidth;
-                    self.frameHeight = self.frameEle.offsetHeight;
-                  }
+                  // if (self.ActiveHandle?.appDragHandle !== 'move') {
+                  //   self.frameWidth = self.frameEle.offsetWidth;
+                  //   self.frameHeight = self.frameEle.offsetHeight;
+                  // }
 
                   // Drop the handle.
                   self.ActiveHandle = null;
@@ -451,132 +489,32 @@ export class DragDirective implements OnDestroy {
 
     // Calculate the offset between the start of the drag operation and the current mouse cursor position. This offset will be used for
     // all drag/resize operations.
-    let [dx, dy] = [event.pageX - self.originX, event.pageY - self.originY];
-
-    // For N/S strict movement, or E/W strict, the opposing axis has no adjustment, even if the mouse cursor
-    // as gone that way.
-    if (['resize-e', 'resize-w'].includes(dragType)) {
-      dy = 0;
-    }
-    if (['resize-n', 'resize-s'].includes(dragType)) {
-      dx = 0;
-    }
-
-    // If we are using aspect ratio locking, and this will be a resize event, we need to modify the (dx,dy) by the aspect ratio.
-    if (self.aspectLocked && dragType !== 'move') {
-      // We adapt the aspect ratio with the following logic:
-      // n or s only resize: there is no change needed.
-      // e or w only resize: there is no change needed.
-      // ne resize: if dx > 0 or dy < 0, use the larger one's absolute value as the basis for that direction, then apply to get the other.
-      //    Otherwise, if both are negative, use the larger non-absolute value as the basis for that direction, then apply to get the other.
-      // se resize: if dx > 0 or dy > 0, use the larger one's absolute value as basis.
-      // sw resize: if dx < 0 or dy > 0, use the larger one's absolute value as basis.
-      // nw resize: if dx < 0 or dy < 0, use the larger one's absolute value as basis.
-
-      let factorx = dx;
-      let factory = dy;
-
-      switch (dragType) {
-        case 'resize-n':
-        case 'resize-s':
-          // N/S movement has no dx component.
-          // dx = Math.abs(Math.floor((dy * self.aspectX) / self.aspectY));
-          dx = 0;
-          break;
-        case 'resize-e':
-        case 'resize-w':
-          // E/W movement has no dy component.
-          //   dy =
-          //     Math.floor((dx * self.aspectY) / self.aspectX) *
-          //     (dragType === 'resize-e' ? -1 : 1);
-          dy = 0;
-          break;
-        case 'resize-ne':
-          factorx = Math.abs(dx);
-          factory = Math.abs(dy);
-          if (factorx > factory) {
-            factorx *= Math.sign(dx);
-            factory = -Math.floor((factorx * self.aspectY) / self.aspectX);
-          } else {
-            factory *= Math.sign(dy);
-            factorx = -Math.floor((factory * self.aspectX) / self.aspectY);
-          }
-          dx = factorx;
-          dy = factory;
-          break;
-        case 'resize-se':
-          factorx = Math.abs(dx);
-          factory = Math.abs(dy);
-          if (factorx > factory) {
-            factorx *= Math.sign(dx);
-            factory = Math.floor((factorx * self.aspectY) / self.aspectX);
-          } else {
-            factory *= Math.sign(dy);
-            factorx = Math.floor((factory * self.aspectX) / self.aspectY);
-          }
-          dx = factorx;
-          dy = factory;
-          break;
-        case 'resize-sw':
-          factorx = Math.abs(dx);
-          factory = Math.abs(dy);
-          if (factorx > factory) {
-            factorx *= Math.sign(dx);
-            factory = -Math.floor((factorx * self.aspectY) / self.aspectX);
-          } else {
-            factory *= Math.sign(dy);
-            factorx = -Math.floor((factory * self.aspectX) / self.aspectY);
-          }
-          dx = factorx;
-          dy = factory;
-          break;
-        case 'resize-nw':
-          factorx = Math.abs(dx);
-          factory = Math.abs(dy);
-          if (factorx > factory) {
-            factorx *= Math.sign(dx);
-            factory = Math.floor((factorx * self.aspectY) / self.aspectX);
-          } else {
-            factory *= Math.sign(dy);
-            factorx = Math.floor((factory * self.aspectX) / self.aspectY);
-          }
-          dx = factorx;
-          dy = factory;
-          break;
-      }
-    }
+    let [dx, dy] = [
+      event.clientX - self.cursorStart.x,
+      event.clientY - self.cursorStart.y,
+    ];
 
     // Variables used for calculating the new position and size of the drag frame/
-    let origRight = self.frameX + self.frameWidth - 1,
-      newRight = self.frameX + self.frameWidth - 1;
-    let origTop = self.frameY,
-      newTop = self.frameY;
-    let origLeft = self.frameX,
-      newLeft = self.frameX;
-    let origBottom = self.frameY + self.frameHeight - 1,
-      newBottom = self.frameY + self.frameHeight - 1;
-    let origHeight = self.frameHeight,
-      newHeight = self.frameHeight; // As defaults, assume no change is performed.
-    let origWidth = self.frameWidth,
-      newWidth = self.frameWidth;
-    let stepsX: number;
-    let stepsX2: number;
-    let stepsY2: number;
-    let stepsY: number;
-    let py = self.frameY;
-    let px = self.frameX;
-    let maxX = self.containerEle.clientWidth - 1;
-    let maxY = self.containerEle.clientHeight - 1;
-    let spaceX: number;
-    let spaceY: number;
-    let spaceX2: number;
-    let spaceY2: number;
+    // let origRight = self.frameX + self.frameWidth - 1,
+    //   newRight = self.frameX + self.frameWidth - 1;
+    // let origTop = self.frameY,
+    //   newTop = self.frameY;
+    // let origLeft = self.frameX,
+    //   newLeft = self.frameX;
+    // let origBottom = self.frameY + self.frameHeight - 1,
+    //   newBottom = self.frameY + self.frameHeight - 1;
+    // let origHeight = self.frameHeight,
+    //   newHeight = self.frameHeight; // As defaults, assume no change is performed.
+    // let origWidth = self.frameWidth,
+    //   newWidth = self.frameWidth;
 
     let result: FramePosition = {
-      Top: origTop,
-      Height: origHeight,
-      Left: origLeft,
-      Width: origWidth,
+      Top: self.frameStart.Top,
+      Left: self.frameStart.Left,
+      Bottom: self.frameStart.Top + self.frameStart.Height - 1,
+      Right: self.frameStart.Left + self.frameStart.Width - 1,
+      Height: self.frameStart.Height,
+      Width: self.frameStart.Width,
     };
 
     // Depending on the active handle's purpose, we either move the drag item, or we resize the drag frame in a certain
@@ -584,34 +522,13 @@ export class DragDirective implements OnDestroy {
     if (dragType === 'move') {
       // This is a simple move/drag operation. We apply the (dx,dy) offset to the frame's original position to move it, but
       // we must be mindful of staying within the containing parent's space.
-      newTop = self.Clamp(
-        self.frameY + dy,
-        0,
-        self.containerEle.clientHeight - 1
-      );
-      newLeft = self.Clamp(
-        self.frameX + dx,
-        0,
-        self.containerEle.clientWidth - 1
-      );
-      newRight = newLeft + self.frameWidth - 1;
-      newBottom = newTop + self.frameHeight - 1;
+      result.Top += dy;
+      result.Left += dx;
+      result.Bottom += dy;
+      result.Right += dx;
 
-      // Now, we check constraints on the right and bottom. If either is out of frame, we adjust the left and top (respectively) to
-      // keep within frame.
-      if (newRight >= self.containerEle.clientWidth) {
-        newLeft += self.containerEle.clientWidth - 1 - newRight;
-      }
-      if (newBottom >= self.containerEle.clientHeight) {
-        newTop += self.containerEle.clientHeight - 1 - newBottom;
-      }
-
-      result = {
-        Left: newLeft,
-        Top: newTop,
-        Width: origWidth,
-        Height: origHeight,
-      };
+      // Constrain frame to be inside of the parent container.
+      self.KeepFrameInsideParent(result, this.parentStart);
     } else {
       // This is a resize event. Based on which handle has been dragged, we must expand the drag frame size as we move the handle,
       // keeping a min and max size constraint in play (based on the drag directive's min size and parent container size). Also,
@@ -620,178 +537,178 @@ export class DragDirective implements OnDestroy {
         case 'resize-ne':
           if (dx === 0 && dy === 0) break;
 
-          result = self.CalculateFrameBoxForCornerHandles({
-            DX: dx,
-            DY: dy,
-            OrigHeight: origHeight,
-            OrigLeft: origLeft,
-            OrigTop: origTop,
-            OrigWidth: origWidth,
-            ParentHeight: self.containerEle.clientHeight,
-            ParentWidth: self.containerEle.clientWidth,
-            AspectX: self.aspectX,
-            AspectY: self.aspectY,
-          });
+          // result = self.CalculateFrameBoxForCornerHandles({
+          //   DX: dx,
+          //   DY: dy,
+          //   OrigHeight: origHeight,
+          //   OrigLeft: origLeft,
+          //   OrigTop: origTop,
+          //   OrigWidth: origWidth,
+          //   ParentHeight: self.containerEle.clientHeight,
+          //   ParentWidth: self.containerEle.clientWidth,
+          //   AspectX: self.aspectX,
+          //   AspectY: self.aspectY,
+          // });
 
           break;
         case 'resize-se':
           // Southeast expansion requires rotating by 90 degrees counter-clockwise, then rotating back.
           if (dx === 0 && dy === 0) break;
 
-          result = self.CalculateFrameBoxForCornerHandles({
-            DX: dy, // Downward motion changes to rightward motion
-            DY: dx,
-            OrigHeight: origWidth,
-            OrigLeft: origTop,
-            OrigTop: self.containerEle.clientWidth - origLeft - origWidth,
-            OrigWidth: origHeight,
-            ParentHeight: self.containerEle.clientWidth,
-            ParentWidth: self.containerEle.clientHeight,
-            AspectX: self.aspectY,
-            AspectY: self.aspectX,
-          });
+          // result = self.CalculateFrameBoxForCornerHandles({
+          //   DX: dy, // Downward motion changes to rightward motion
+          //   DY: dx,
+          //   OrigHeight: origWidth,
+          //   OrigLeft: origTop,
+          //   OrigTop: self.containerEle.clientWidth - origLeft - origWidth,
+          //   OrigWidth: origHeight,
+          //   ParentHeight: self.containerEle.clientWidth,
+          //   ParentWidth: self.containerEle.clientHeight,
+          //   AspectX: self.aspectY,
+          //   AspectY: self.aspectX,
+          // });
 
-          // The returned result must be rotated back 90 degrees counter-clockwise.
-          [result.Left, result.Top] = [
-            self.containerEle.clientWidth - result.Top - result.Height,
-            result.Left,
-          ];
-          [result.Width, result.Height] = [result.Height, result.Width];
+          // // The returned result must be rotated back 90 degrees counter-clockwise.
+          // [result.Left, result.Top] = [
+          //   self.containerEle.clientWidth - result.Top - result.Height,
+          //   result.Left,
+          // ];
+          // [result.Width, result.Height] = [result.Height, result.Width];
           break;
         case 'resize-sw':
           // Southwest expansion requires mirroring across both axes, then mirroring back.
           if (dx === 0 && dy === 0) break;
 
-          result = self.CalculateFrameBoxForCornerHandles({
-            DX: -dx, // Leftward motion changes to rightward motion
-            DY: -dy, // Rightward motion changes to upward motion
-            OrigHeight: origHeight,
-            OrigLeft: self.containerEle.clientWidth - origWidth - origLeft + 1,
-            OrigTop: self.containerEle.clientHeight - origHeight - origTop + 1,
-            OrigWidth: origWidth,
-            ParentHeight: self.containerEle.clientHeight,
-            ParentWidth: self.containerEle.clientWidth,
-            AspectX: self.aspectX,
-            AspectY: self.aspectY,
-          });
+          // result = self.CalculateFrameBoxForCornerHandles({
+          //   DX: -dx, // Leftward motion changes to rightward motion
+          //   DY: -dy, // Rightward motion changes to upward motion
+          //   OrigHeight: origHeight,
+          //   OrigLeft: self.containerEle.clientWidth - origWidth - origLeft + 1,
+          //   OrigTop: self.containerEle.clientHeight - origHeight - origTop + 1,
+          //   OrigWidth: origWidth,
+          //   ParentHeight: self.containerEle.clientHeight,
+          //   ParentWidth: self.containerEle.clientWidth,
+          //   AspectX: self.aspectX,
+          //   AspectY: self.aspectY,
+          // });
 
-          // The returned result must be mirrored back.
-          [result.Left, result.Top] = [
-            self.containerEle.clientWidth - result.Width - result.Left,
-            self.containerEle.clientHeight - result.Height - result.Top,
-          ];
+          // // The returned result must be mirrored back.
+          // [result.Left, result.Top] = [
+          //   self.containerEle.clientWidth - result.Width - result.Left,
+          //   self.containerEle.clientHeight - result.Height - result.Top,
+          // ];
           break;
         case 'resize-nw':
           // Northwest expansion requires rotating by 90 degrees clockwise, then rotating back.
           if (dx === 0 && dy === 0) break;
 
-          result = self.CalculateFrameBoxForCornerHandles({
-            DX: -dy, // Upward motion changes to rightward motion
-            DY: dx,
-            OrigHeight: origWidth,
-            OrigWidth: origHeight,
-            OrigLeft: self.containerEle.clientHeight - origTop - origHeight,
-            OrigTop: origLeft,
-            ParentHeight: self.containerEle.clientWidth,
-            ParentWidth: self.containerEle.clientHeight,
-            AspectX: self.aspectY,
-            AspectY: self.aspectX,
-          });
+          // result = self.CalculateFrameBoxForCornerHandles({
+          //   DX: -dy, // Upward motion changes to rightward motion
+          //   DY: dx,
+          //   OrigHeight: origWidth,
+          //   OrigWidth: origHeight,
+          //   OrigLeft: self.containerEle.clientHeight - origTop - origHeight,
+          //   OrigTop: origLeft,
+          //   ParentHeight: self.containerEle.clientWidth,
+          //   ParentWidth: self.containerEle.clientHeight,
+          //   AspectX: self.aspectY,
+          //   AspectY: self.aspectX,
+          // });
 
-          // The returned result must be rotated back 90 degrees counter-clockwise.
-          [result.Left, result.Top] = [
-            result.Top,
-            self.containerEle.clientHeight - result.Left - result.Width,
-          ];
-          [result.Width, result.Height] = [result.Height, result.Width];
+          // // The returned result must be rotated back 90 degrees counter-clockwise.
+          // [result.Left, result.Top] = [
+          //   result.Top,
+          //   self.containerEle.clientHeight - result.Left - result.Width,
+          // ];
+          // [result.Width, result.Height] = [result.Height, result.Width];
           break;
         case 'resize-e':
           // If there is no adjustment in either direction, break immediately.
           if (dx === 0 && dy === 0) break;
 
-          result = self.CalculateFrameBoxForCenterHandles({
-            DX: dx,
-            DY: dy,
-            OrigHeight: origHeight,
-            OrigLeft: origLeft,
-            OrigTop: origTop,
-            OrigWidth: origWidth,
-            ParentHeight: self.containerEle.clientHeight,
-            ParentWidth: self.containerEle.clientWidth,
-            AspectX: self.aspectX,
-            AspectY: self.aspectY,
-          });
+          // result = self.CalculateFrameBoxForCenterHandles({
+          //   DX: dx,
+          //   DY: dy,
+          //   OrigHeight: origHeight,
+          //   OrigLeft: origLeft,
+          //   OrigTop: origTop,
+          //   OrigWidth: origWidth,
+          //   ParentHeight: self.containerEle.clientHeight,
+          //   ParentWidth: self.containerEle.clientWidth,
+          //   AspectX: self.aspectX,
+          //   AspectY: self.aspectY,
+          // });
 
           break;
         case 'resize-w':
           // Reflect the problem E/W, use the solver, then reflect solution back out.
           if (dx === 0 && dy === 0) break;
 
-          result = self.CalculateFrameBoxForCenterHandles({
-            DX: -dx,
-            DY: dy,
-            OrigHeight: origHeight,
-            OrigLeft: self.containerEle.clientWidth - origLeft - origWidth,
-            OrigTop: origTop,
-            OrigWidth: origWidth,
-            ParentHeight: self.containerEle.clientHeight,
-            ParentWidth: self.containerEle.clientWidth,
-            AspectX: self.aspectX,
-            AspectY: self.aspectY,
-          });
+          // result = self.CalculateFrameBoxForCenterHandles({
+          //   DX: -dx,
+          //   DY: dy,
+          //   OrigHeight: origHeight,
+          //   OrigLeft: self.containerEle.clientWidth - origLeft - origWidth,
+          //   OrigTop: origTop,
+          //   OrigWidth: origWidth,
+          //   ParentHeight: self.containerEle.clientHeight,
+          //   ParentWidth: self.containerEle.clientWidth,
+          //   AspectX: self.aspectX,
+          //   AspectY: self.aspectY,
+          // });
 
-          // The returned Left value now represents the new right edge of the frame, so we must calculate the proper left edge to place in the result.
-          result.Left =
-            self.containerEle.clientWidth - result.Left - result.Width;
+          // // The returned Left value now represents the new right edge of the frame, so we must calculate the proper left edge to place in the result.
+          // result.Left =
+          //   self.containerEle.clientWidth - result.Left - result.Width;
 
           break;
         case 'resize-n':
           // Rotate the problem 90 deg clockwise, then rotate solution back to the left.
           if (dx === 0 && dy === 0) break;
 
-          result = self.CalculateFrameBoxForCenterHandles({
-            DX: -dy, // Upward motion changes to rightward motion
-            DY: dx,
-            OrigHeight: origWidth,
-            OrigLeft: self.containerEle.clientHeight - origTop - origHeight,
-            OrigTop: origLeft,
-            OrigWidth: origHeight,
-            ParentHeight: self.containerEle.clientWidth,
-            ParentWidth: self.containerEle.clientHeight,
-            AspectX: self.aspectY,
-            AspectY: self.aspectX,
-          });
+          // result = self.CalculateFrameBoxForCenterHandles({
+          //   DX: -dy, // Upward motion changes to rightward motion
+          //   DY: dx,
+          //   OrigHeight: origWidth,
+          //   OrigLeft: self.containerEle.clientHeight - origTop - origHeight,
+          //   OrigTop: origLeft,
+          //   OrigWidth: origHeight,
+          //   ParentHeight: self.containerEle.clientWidth,
+          //   ParentWidth: self.containerEle.clientHeight,
+          //   AspectX: self.aspectY,
+          //   AspectY: self.aspectX,
+          // });
 
-          // The returned result must be rotated back 90 degrees counter-clockwise.
-          [result.Left, result.Top] = [
-            result.Top,
-            self.containerEle.clientHeight - result.Left - result.Width,
-          ];
-          [result.Width, result.Height] = [result.Height, result.Width];
+          // // The returned result must be rotated back 90 degrees counter-clockwise.
+          // [result.Left, result.Top] = [
+          //   result.Top,
+          //   self.containerEle.clientHeight - result.Left - result.Width,
+          // ];
+          // [result.Width, result.Height] = [result.Height, result.Width];
           break;
         case 'resize-s':
           // Rotate the problem 90 deg counter-clockwise, then rotate solution back to the right.
           if (dx === 0 && dy === 0) break;
 
-          result = self.CalculateFrameBoxForCenterHandles({
-            DX: dy, // Downward motion changes to rightward motion
-            DY: dx,
-            OrigHeight: origWidth,
-            OrigLeft: origTop,
-            OrigTop: self.containerEle.clientWidth - origLeft - origWidth,
-            OrigWidth: origHeight,
-            ParentHeight: self.containerEle.clientWidth,
-            ParentWidth: self.containerEle.clientHeight,
-            AspectX: self.aspectY,
-            AspectY: self.aspectX,
-          });
+          // result = self.CalculateFrameBoxForCenterHandles({
+          //   DX: dy, // Downward motion changes to rightward motion
+          //   DY: dx,
+          //   OrigHeight: origWidth,
+          //   OrigLeft: origTop,
+          //   OrigTop: self.containerEle.clientWidth - origLeft - origWidth,
+          //   OrigWidth: origHeight,
+          //   ParentHeight: self.containerEle.clientWidth,
+          //   ParentWidth: self.containerEle.clientHeight,
+          //   AspectX: self.aspectY,
+          //   AspectY: self.aspectX,
+          // });
 
-          // The returned result must be rotated back 90 degrees counter-clockwise.
-          [result.Left, result.Top] = [
-            self.containerEle.clientWidth - result.Top - result.Height,
-            result.Left,
-          ];
-          [result.Width, result.Height] = [result.Height, result.Width];
+          // // The returned result must be rotated back 90 degrees counter-clockwise.
+          // [result.Left, result.Top] = [
+          //   self.containerEle.clientWidth - result.Top - result.Height,
+          //   result.Left,
+          // ];
+          // [result.Width, result.Height] = [result.Height, result.Width];
           break;
       }
     }
@@ -801,14 +718,86 @@ export class DragDirective implements OnDestroy {
     self.frameEle.style.left = `${result.Left}px`;
     self.frameEle.style.width = `${result.Width}px`;
     self.frameEle.style.height = `${result.Height}px`;
+
+    // Update our tracking variables.
+    self.frameStart = {
+      Top: result.Top,
+      Left: result.Left,
+      Right: result.Right,
+      Bottom: result.Bottom,
+      Width: result.Width,
+      Height: result.Height,
+    };
+
+    // If the cursor position is outside of the drag zone, clamp it accordingly.
+    self.cursorStart = {
+      x: self.Clamp(event.clientX, this.dragZone.x1, this.dragZone.x2),
+      y: self.Clamp(event.clientY, this.dragZone.y1, this.dragZone.y2),
+    };
+  }
+
+  // #endregion
+
+  // #region Keep Frame Inside Parent
+
+  KeepFrameInsideParent(frame: FramePosition, parent: FramePosition) {
+    // First, check the horiz. If the width of the frame is larger than the available parent width, force the frame to be contained within.
+    if (frame.Right - frame.Left > parent.Width) {
+      frame.Left = 0;
+      frame.Right = parent.Width - 1;
+      frame.Width = frame.Right - frame.Left + 1;
+    } else {
+      if (frame.Left < 0) {
+        const dx = -frame.Left;
+        frame.Left += dx;
+        frame.Right += dx;
+      }
+      if (frame.Right > parent.Width - 1) {
+        const dx = parent.Width - 1 - frame.Right;
+        frame.Left += dx;
+        frame.Right += dx;
+      }
+    }
+
+    // Now, check the vert.
+    if (frame.Height > parent.Height) {
+      frame.Top = 0;
+      frame.Bottom = parent.Height - 1;
+      frame.Height = frame.Bottom - frame.Top + 1;
+    } else {
+      if (frame.Top < 0) {
+        const dy = -frame.Top;
+        frame.Top += dy;
+        frame.Bottom += dy;
+      }
+      if (frame.Bottom > parent.Height - 1) {
+        const dy = parent.Height - 1 - frame.Bottom;
+        frame.Top += dy;
+        frame.Bottom += dy;
+      }
+    }
   }
 
   // #endregion
 }
 
+interface CursorPosition {
+  x: number;
+  y: number;
+}
+
+interface Rectangle {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 interface FramePosition {
   Top: number;
   Left: number;
+  Right: number;
+  Bottom: number;
   Width: number;
   Height: number;
 }

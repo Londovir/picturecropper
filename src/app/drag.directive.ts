@@ -46,8 +46,8 @@ export class DragDirective implements OnDestroy {
     this._appDragParent = _adp;
   }
   @Input() appDragMinWidth: number = 50;
-  @Input() appDragMinHeight: number = 50;
-  @Input() appDragAspectRatio: string = '1:1';
+  @Input() appDragMinHeight: number = 100;
+  @Input() appDragAspectRatio: string = '1:2';
 
   @ContentChildren(DragHandleDirective) set dragHandles(
     _han: QueryList<DragHandleDirective> | null
@@ -121,7 +121,6 @@ export class DragDirective implements OnDestroy {
     if (!this.aspectLocked) {
       [this.aspectX, this.aspectY] = [0, 0];
     }
-    console.log('aspect is: ', [this.aspectX, this.aspectY, this.aspectLocked]);
   }
 
   ngAfterContentInit(): void {
@@ -149,6 +148,199 @@ export class DragDirective implements OnDestroy {
     this.ActiveDragSub?.unsubscribe();
     this.ActiveDragSub = null;
   }
+
+  // #region Calculate Frame Box For Center Handle
+
+  CalculateFrameBoxForCenterHandles(setup: FrameProblem): FramePosition {
+    const self = this;
+    let dx = setup.DX;
+    let dy = setup.DY;
+    const maxX = setup.ParentWidth - 1;
+    const maxY = setup.ParentHeight - 1;
+    const origWidth = setup.OrigWidth;
+    const origHeight = setup.OrigHeight;
+    const origLeft = setup.OrigLeft;
+    const origRight = origLeft + origWidth;
+    const origTop = setup.OrigTop;
+
+    let spaceX: number, spaceY: number, stepsX: number, stepsY: number;
+    let newWidth = origWidth,
+      newHeight = origHeight,
+      newTop = origTop,
+      newLeft = origLeft;
+
+    spaceX = maxX - origRight;
+    spaceY = maxY - origHeight;
+
+    if (dx < 0) {
+      // This is a contraction. All we have to worry about is
+      // maintaining a minimum width/height.
+      dx *= -1;
+      spaceX = origWidth - self.appDragMinWidth;
+      spaceY = origHeight - self.appDragMinHeight;
+      dy = Math.floor((dx * self.aspectY) / self.aspectX);
+      if (dx > spaceX || dy > spaceY) {
+        // Calculate the # of "steps" needed for either/both directions to max out.
+        stepsX = dx > spaceX ? spaceX / dx : +Infinity;
+        stepsY = dy > spaceY ? spaceY / dy : +Infinity;
+
+        if (stepsX < stepsY) {
+          // The width hits the min first. Set min width, then adjust height accordingly.
+          newWidth = self.appDragMinWidth;
+          newHeight = Math.floor((newWidth * self.aspectY) / self.aspectX);
+          newTop = origTop + Math.floor((origHeight - newHeight) / 2);
+        } else {
+          // The height his the min first. Set min height, then adjust width accordingly.
+          newHeight = self.appDragMinHeight;
+          newWidth = Math.floor((newHeight * self.aspectX) / self.aspectY);
+          newTop = origTop + Math.floor((origHeight - newHeight) / 2);
+        }
+      } else {
+        // Simple contraction, no restriction.
+        newWidth = origWidth - dx;
+        newHeight = origHeight - dy;
+        newTop = origTop + Math.floor(dy / 2);
+      }
+    } else {
+      // This is an expansion. Let's check the expansion rates against the available
+      // horiz. and vert. space. If either is over, it means we must deal with container collisions.
+      dy = Math.floor((dx * self.aspectY) / self.aspectX);
+      if (dx > spaceX || dy > spaceY) {
+        // Calculate the # of "steps" needed for either/both directions to max out.
+        stepsX = dx > spaceX ? spaceX / dx : +Infinity;
+        stepsY = dy > spaceY ? spaceY / dy : +Infinity;
+
+        if (stepsX < stepsY) {
+          // The E/W axis runs out first. Max the expansion to that wall, then split out the equal expansion to the N/S axis.
+          newWidth = origWidth + spaceX + 1;
+          newHeight = Math.floor((newWidth * self.aspectY) / self.aspectX);
+          spaceY = Math.floor((spaceX * self.aspectY) / self.aspectX);
+          stepsY = Math.floor(spaceY / 2);
+          newTop = Math.max(origTop - stepsY, 0);
+          if (newTop + newHeight > maxY) {
+            stepsY = newTop + newHeight - maxY - 1;
+            newTop -= stepsY;
+          }
+        } else {
+          // The N/S axis runs out first. Max the expansion to both walls, then move the E axis the same amount.
+          newHeight = origHeight + spaceY + 1;
+          newTop = 0;
+          spaceX = Math.floor((spaceY * self.aspectX) / self.aspectY);
+          newWidth = origWidth + spaceX;
+        }
+      } else {
+        // No colision. Simple expansion.
+        newWidth = origWidth + dx;
+        newHeight = Math.floor((newWidth * self.aspectY) / self.aspectX);
+        stepsY = Math.floor(dy / 2);
+        newTop = Math.max(origTop - stepsY, 0);
+        if (newTop + newHeight > maxY) {
+          stepsY = newTop + newHeight - maxY - 1;
+          newTop -= stepsY;
+        }
+      }
+    }
+
+    return {
+      Top: newTop,
+      Left: newLeft,
+      Width: newWidth,
+      Height: newHeight,
+    } as FramePosition;
+  }
+
+  // #endregion
+
+  // #region Calculate Frame Box For Corner Handle
+
+  CalculateFrameBoxForCornerHandles(setup: FrameProblem): FramePosition {
+    const self = this;
+    let dx = setup.DX;
+    let dy = setup.DY;
+    const maxX = setup.ParentWidth - 1;
+    const maxY = setup.ParentHeight - 1;
+    const origWidth = setup.OrigWidth;
+    const origHeight = setup.OrigHeight;
+    const origLeft = setup.OrigLeft;
+    const origRight = origLeft + origWidth - 1;
+    const origTop = setup.OrigTop;
+
+    let spaceX: number, spaceY: number, stepsX: number, stepsY: number;
+    let newWidth = origWidth,
+      newHeight = origHeight,
+      newTop = origTop,
+      newLeft = origLeft;
+
+    spaceX = maxX - origRight;
+    spaceY = origTop;
+
+    if (dx < 0) {
+      // This is a contraction. All we have to worry about is
+      // maintaining a minimum width/height.
+      dx *= -1;
+      spaceX = origWidth - self.appDragMinWidth;
+      spaceY = origHeight - self.appDragMinHeight;
+      dy = Math.floor((dx * setup.AspectY) / setup.AspectX);
+      if (dx > spaceX || dy > spaceY) {
+        // Calculate the # of "steps" needed for either/both directions to max out.
+        stepsX = dx > spaceX ? spaceX / dx : +Infinity;
+        stepsY = dy > spaceY ? spaceY / dy : +Infinity;
+
+        if (stepsX < stepsY) {
+          // The width hits the min first. Set min width, then adjust height accordingly.
+          newWidth = self.appDragMinWidth;
+          newHeight = Math.floor((newWidth * setup.AspectY) / setup.AspectX);
+          newTop = origTop + Math.floor(origHeight - newHeight);
+        } else {
+          // The height his the min first. Set min height, then adjust width accordingly.
+          newHeight = self.appDragMinHeight;
+          newWidth = Math.floor((newHeight * setup.AspectX) / setup.AspectY);
+          newTop = origTop + Math.floor(origHeight - newHeight);
+        }
+      } else {
+        // Simple contraction, no restriction.
+        newWidth = origWidth - dx;
+        newHeight = origHeight - dy;
+        newTop = origTop + dy;
+      }
+    } else {
+      // This is an expansion. Let's check the expansion rates against the available
+      // horiz. and vert. space. If either is over, it means we must deal with container collisions.
+      dy = Math.floor((dx * setup.AspectY) / setup.AspectX);
+      if (dx > spaceX || dy > spaceY) {
+        // Calculate the # of "steps" needed for either/both directions to max out.
+        stepsX = dx > spaceX ? spaceX / dx : +Infinity;
+        stepsY = dy > spaceY ? spaceY / dy : +Infinity;
+
+        if (stepsX < stepsY) {
+          // The E/W axis runs out first. Max the expansion to that wall, then split out the equal expansion to the N/S axis.
+          newWidth = origWidth + spaceX;
+          newHeight = Math.round((newWidth * setup.AspectY) / setup.AspectX);
+          newTop = Math.max(origTop - (newHeight - origHeight), 0);
+        } else {
+          // The N/S axis runs out first. Max the expansion to both walls, then move the E axis the same amount.
+          newHeight = origHeight + spaceY;
+          newTop = 0;
+          spaceX = Math.floor((spaceY * setup.AspectX) / setup.AspectY);
+          newWidth = origWidth + spaceX;
+        }
+      } else {
+        // No colision. Simple expansion.
+        newWidth = origWidth + dx;
+        newHeight = Math.floor((newWidth * setup.AspectY) / setup.AspectX);
+        newTop = Math.max(origTop - dy, 0);
+      }
+    }
+
+    return {
+      Top: newTop,
+      Left: newLeft,
+      Width: newWidth,
+      Height: newHeight,
+    } as FramePosition;
+  }
+
+  // #endregion
 
   // #region Clamp
 
@@ -225,357 +417,11 @@ export class DragDirective implements OnDestroy {
         switchMap(() =>
           $mousemove!.pipe(
             tap((event) => {
-              if (!self._appDragParent) return;
-              console.log('--------------------------------------------------');
-
-              // Calculate the offset between the start of the drag operation and the current mouse cursor position. This offset will be used for
-              // all drag/resize operations.
-              let [dx, dy] = [
-                event.pageX - self.originX,
-                event.pageY - self.originY,
-              ];
-
-              // If we are using aspect ratio locking, and this will be a resize event, we need to modify the (dx,dy) by the aspect ratio.
-              if (
-                self.aspectLocked &&
-                self.ActiveHandle?.appDragHandle !== 'move'
-              ) {
-                // We adapt the aspect ratio with the following logic:
-                // n or s only resize: apply the ratio to dy to get dx.
-                // e or w only resize: apply the ratio to dx to get dy.
-                // ne resize: if dx > 0 or dy < 0, use the larger one's absolute value as the basis for that direction, then apply to get the other.
-                //    Otherwise, if both are negative, use the larger non-absolute value as the basis for that direction, then apply to get the other.
-                // se resize: if dx > 0 or dy > 0, use the larger one's absolute value as basis.
-                // sw resize: if dx < 0 or dy > 0, use the larger one's absolute value as basis.
-                // nw resize: if dx < 0 or dy < 0, use the larger one's absolute value as basis.
-                switch (self.ActiveHandle?.appDragHandle) {
-                  case 'resize-e':
-                    dy = -Math.floor((dx * self.aspectY) / self.aspectX);
-                    break;
-                }
-              }
-
-              // Variables used for calculating the new position and size of the drag frame/
-              let newRight = self.frameX + self.frameWidth - 1;
-              let newTop = self.frameY;
-              let newLeft = self.frameX;
-              let newBottom = self.frameY + self.frameHeight - 1;
-              let newHeight = self.frameHeight; // As defaults, assume no change is performed.
-              let newWidth = self.frameWidth;
-              let py = self.frameY;
-              let px = self.frameX;
-
-              // Depending on the active handle's purpose, we either move the drag item, or we resize the drag frame in a certain
-              // direction.
-              if (self.ActiveHandle?.appDragHandle === 'move') {
-                // This is a simple move/drag operation. We apply the (dx,dy) offset to the frame's original position to move it, but
-                // we must be mindful of staying within the containing parent's space.
-                newTop = self.Clamp(
-                  self.frameY + dy,
-                  0,
-                  self.containerEle.clientHeight - 1
-                );
-                newLeft = self.Clamp(
-                  self.frameX + dx,
-                  0,
-                  self.containerEle.clientWidth - 1
-                );
-                newRight = newLeft + self.frameWidth - 1;
-                newBottom = newTop + self.frameHeight - 1;
-
-                // Now, we check constraints on the right and bottom. If either is out of frame, we adjust the left and top (respectively) to
-                // keep within frame.
-                if (newRight >= self.containerEle.clientWidth) {
-                  newLeft += self.containerEle.clientWidth - 1 - newRight;
-                }
-                if (newBottom >= self.containerEle.clientHeight) {
-                  newTop += self.containerEle.clientHeight - 1 - newBottom;
-                }
-
-                px = newLeft;
-                py = newTop;
-
-                // Apply the (dx,dy) offset to the drag frame's initial upper-left (x,y) to get the new coords to move the drag frame to.
-                // [px, py] = [self.frameX + dx, self.frameY + dy];
-
-                // // To ensure we can't drag the drag frame out of the drag frame's containing parent element, we now clamp this (px, py) location
-                // // to be within that container.
-                // px = self.Clamp(
-                //   px,
-                //   0,
-                //   self._appDragParent.offsetWidth -
-                //     self._appDragParent.clientLeft -
-                //     self.frameWidth
-                // );
-                // py = self.Clamp(
-                //   py,
-                //   0,
-                //   self._appDragParent.offsetHeight -
-                //     self._appDragParent.clientTop -
-                //     self.frameHeight
-                // );
-
-                // // Now move the drag frame to these new coordinates.
-                // self.frameEle.style.top = `${py}px`;
-                // self.frameEle.style.left = `${px}px`;
-              } else {
-                // This is a resize event. Based on which handle has been dragged, we must expand the drag frame size as we move the handle,
-                // keeping a min and max size constraint in play (based on the drag directive's min size and parent container size). Also,
-                // if an aspect ratio has been imposed, we must pin the drag frame to this aspect ratio as we expand.
-
-                // First, let's handle resizing along the east-west axis.
-                switch (self.ActiveHandle?.appDragHandle) {
-                  case 'resize-nw':
-                  case 'resize-w':
-                  case 'resize-sw':
-                    newLeft = self.frameX + dx;
-
-                    if (newLeft < 0) {
-                      // User is expanding horiz axis too much. Clamp at 0, and optionally reset dx if we are aspect locked.
-                      newLeft = 0;
-                      if (
-                        self.aspectLocked &&
-                        self.ActiveHandle?.appDragHandle === 'resize-w'
-                      ) {
-                        dx = -self.frameX;
-                      }
-                    }
-
-                    if (newLeft > newRight - self.appDragMinWidth + 1) {
-                      // User is shrinking horiz axis too small. Clamp at the min, and optionally reset dx if we are aspect locked.
-                      newLeft = newRight - self.appDragMinWidth + 1;
-                      if (
-                        self.aspectLocked &&
-                        self.ActiveHandle?.appDragHandle === 'resize-w'
-                      ) {
-                        dx = newLeft - self.frameX;
-                      }
-                    }
-
-                    newWidth = newRight - newLeft + 1;
-                    px = newLeft;
-                    console.log('Done moving to new px ' + px);
-                    break;
-                  case 'resize-se':
-                  case 'resize-e':
-                  case 'resize-ne':
-                    newRight = self.frameX + self.frameWidth - 1 + dx;
-
-                    if (newRight < self.frameX + self.appDragMinWidth - 1) {
-                      // User is shrinking horiz axis too small. Clamp at the min, and optionally reset dx if we are aspect locked.
-                      newRight = self.frameX + self.appDragMinWidth - 1;
-                      if (
-                        self.aspectLocked &&
-                        self.ActiveHandle?.appDragHandle === 'resize-e'
-                      ) {
-                        dx = -(self.frameX + self.frameWidth - newRight);
-                      }
-                    }
-
-                    if (newRight > self.containerEle.clientWidth - 1) {
-                      // User is expanding horiz axis too much. Clamp at the max, and optionally reset dx if we are aspect locked.
-                      newRight = self.containerEle.clientWidth - 1;
-                      if (
-                        self.aspectLocked &&
-                        self.ActiveHandle?.appDragHandle === 'resize-e'
-                      ) {
-                        dx =
-                          self.containerEle.clientWidth -
-                          self.frameX -
-                          self.frameWidth;
-                      }
-                    }
-
-                    newWidth = newRight - self.frameX + 1;
-                    break;
-                }
-
-                // Next, let's handle resizing along the north-south axis.
-                switch (self.ActiveHandle?.appDragHandle) {
-                  case 'resize-nw':
-                  case 'resize-n':
-                  case 'resize-ne':
-                    newBottom = self.frameY + self.frameHeight - 1;
-                    newTop = self.Clamp(
-                      self.frameY + dy,
-                      0,
-                      newBottom - self.appDragMinHeight + 1
-                    );
-
-                    newHeight = newBottom - newTop + 1;
-                    py = newTop;
-                    break;
-                  case 'resize-sw':
-                  case 'resize-s':
-                  case 'resize-se':
-                    newBottom = self.Clamp(
-                      self.frameY + self.frameHeight - 1 + dy,
-                      self.frameY + self.appDragMinHeight - 1,
-                      self.containerEle.clientHeight - 1
-                    );
-
-                    newHeight = newBottom - self.frameY + 1;
-                    break;
-                  case 'resize-e':
-                  case 'resize-w':
-                    // If we are aspect locked, we adjust now with half upwards and half downwards. One or both may be pinned in this attempt, though.
-                    // We calculate where the top and bottom would like to be, see if we need to adjust an overage in either direction, and if necessary,
-                    // we pull back the new width if we can't "spend" the full adjustment in the other direction.
-                    if (self.aspectLocked) {
-                      console.log('dx being adjusted by ', dx);
-                      console.log('half height ' + self.frameHeight / 2);
-                      console.log(
-                        'half min height ' + self.appDragMinHeight / 2
-                      );
-                      console.log(
-                        'available space: ' +
-                          (self.frameHeight / 2 - self.appDragMinHeight / 2)
-                      );
-
-                      const isWest =
-                        self.ActiveHandle?.appDragHandle === 'resize-w';
-                      const isExpanding =
-                        (!isWest && dx > 0) || (isWest && dx < 0);
-
-                      let halfdyup =
-                        Math.abs(dx / 2.0) * (isExpanding ? 1 : -1);
-                      let halfdydown =
-                        (Math.abs(dx) - Math.abs(halfdyup)) *
-                        (isExpanding ? 1 : -1);
-
-                      let spaceUp = isExpanding
-                        ? self.frameY
-                        : self.frameHeight / 2 - self.appDragMinHeight / 2;
-                      let spaceDown = isExpanding
-                        ? self.containerEle.clientHeight -
-                          1 -
-                          self.frameY -
-                          self.frameHeight
-                        : self.frameHeight / 2 - self.appDragMinHeight / 2;
-
-                      let topPinned = false,
-                        botPinned = false;
-                      let overage = 0;
-                      let breakOut = false;
-                      let allocated = 0;
-
-                      console.log(
-                        `moving ${
-                          self.ActiveHandle?.appDragHandle === 'resize-e'
-                            ? 'right'
-                            : 'left'
-                        } with halfdydown = ${halfdydown}`
-                      );
-
-                      while (!(topPinned && botPinned) && !breakOut) {
-                        breakOut = true; // Assume we will be okay on this pass.
-
-                        if (Math.abs(halfdyup) > 1e-4) {
-                          // We need to either expand upwards (halfdyup > 0) or contract downards (halfdyup < 0). Try to do all of it now.
-                          overage = Math.abs(halfdyup) - spaceUp;
-                          if (overage > 0) {
-                            // We were unable to allocate/shrink all space to/from the top. If we're not yet top pinned, flag it now and move the balance
-                            // to the bottom.
-                            if (!topPinned) {
-                              halfdydown += halfdyup > 0 ? overage : -overage;
-                              overage = 0;
-                              newTop += halfdyup > 0 ? -spaceUp : spaceUp;
-                              allocated += spaceUp;
-                              halfdyup = 0; // Reset, as we cannot move any more upwards.
-                              spaceUp = 0;
-                              topPinned = true;
-                              breakOut = false;
-                            }
-                          } else {
-                            // We allocated/shrank all of the needed space. Adjust parameters.
-                            console.log(
-                              'allocated total of ' + halfdyup + ' to top'
-                            );
-                            allocated += halfdyup;
-                            newTop += -halfdyup;
-                            spaceUp += halfdyup > 0 ? -halfdyup : halfdyup;
-                            halfdyup = 0;
-                          }
-                        }
-
-                        if (Math.abs(halfdydown) > 1e-4) {
-                          // We have a need to expand/contract the bottom edge. Try to do it all down now.
-                          overage = Math.abs(halfdydown) - spaceDown;
-                          if (overage > 0) {
-                            // We were unable to allocate/contract all space to the bottom. If we're not yet bottom pinned, flag it now and move the balance
-                            // to the top.
-                            if (!botPinned) {
-                              console.log(
-                                'Have to move ' +
-                                  overage +
-                                  ' from bottom to top'
-                              );
-                              halfdyup += halfdydown > 0 ? overage : -overage;
-                              overage = 0;
-                              allocated += spaceDown;
-                              newBottom +=
-                                halfdydown > 0 ? spaceDown : -spaceDown;
-                              spaceDown = 0;
-                              halfdydown = 0; // Reset, as we cannot move any more downards.
-                              botPinned = true;
-                              breakOut = false;
-                            }
-                          } else {
-                            // We allocated all of the needed space. Adjust parameters.
-                            console.log(
-                              'allocated total of ' + halfdydown + ' to bottom'
-                            );
-                            newBottom += halfdydown;
-                            allocated += halfdydown;
-                            spaceDown +=
-                              halfdydown > 0 ? -halfdydown : halfdydown;
-                            halfdydown = 0;
-                          }
-                        }
-                      }
-
-                      if (topPinned && botPinned) {
-                        console.log('both pinned');
-                        // Both the top and the bottom are pinned. That means we may not have been able to apportion the full dx amount in the vertical
-                        // direction. If we didn't, we need to "pull back" the dx expansion to keep in aspect ratio.
-                        overage = Math.abs(dx) - Math.abs(allocated);
-                        if (overage > 0) {
-                          // Pull back by the overage amount.
-                          console.log('Must reduce width by ', overage);
-                          if (isWest) {
-                            console.log(
-                              'moving left edge back to the right by ' + overage
-                            );
-                            newLeft += overage;
-                            newWidth -= overage;
-                            px = newLeft;
-                          } else {
-                            console.log('reducing width by ' + overage);
-                            newWidth -= overage;
-                          }
-                        }
-                      }
-
-                      // Set the height now accordingly.
-                      // newTop = self.frameY - halfdyup;
-                      // newBottom = self.frameY + self.frameHeight + halfdydown;
-                      newHeight = newBottom - newTop + 1;
-                      py = newTop;
-                    }
-                    break;
-                }
-              }
-
-              // Move and resize the drag frame accordingly.
-              self.frameEle.style.top = `${py}px`;
-              self.frameEle.style.left = `${px}px`;
-              self.frameEle.style.width = `${newWidth}px`;
-              self.frameEle.style.height = `${newHeight}px`;
+              self.HandleDragMove2(event);
             }),
             takeUntil(
               $mouseup!.pipe(
                 tap((event) => {
-                  console.log('stopping drag');
                   // If this was a resize operation, now that we're done we need to lock in the new width/height of the drag frame.
                   if (self.ActiveHandle?.appDragHandle !== 'move') {
                     self.frameWidth = self.frameEle.offsetWidth;
@@ -594,4 +440,388 @@ export class DragDirective implements OnDestroy {
   }
 
   // #endregion
+
+  // #region Handle Drag Move
+
+  HandleDragMove2(event: MouseEvent) {
+    const self = this;
+
+    if (!self._appDragParent || !self.ActiveHandle?.appDragHandle) return;
+    const dragType = self.ActiveHandle?.appDragHandle || '';
+
+    // Calculate the offset between the start of the drag operation and the current mouse cursor position. This offset will be used for
+    // all drag/resize operations.
+    let [dx, dy] = [event.pageX - self.originX, event.pageY - self.originY];
+
+    // For N/S strict movement, or E/W strict, the opposing axis has no adjustment, even if the mouse cursor
+    // as gone that way.
+    if (['resize-e', 'resize-w'].includes(dragType)) {
+      dy = 0;
+    }
+    if (['resize-n', 'resize-s'].includes(dragType)) {
+      dx = 0;
+    }
+
+    // If we are using aspect ratio locking, and this will be a resize event, we need to modify the (dx,dy) by the aspect ratio.
+    if (self.aspectLocked && dragType !== 'move') {
+      // We adapt the aspect ratio with the following logic:
+      // n or s only resize: there is no change needed.
+      // e or w only resize: there is no change needed.
+      // ne resize: if dx > 0 or dy < 0, use the larger one's absolute value as the basis for that direction, then apply to get the other.
+      //    Otherwise, if both are negative, use the larger non-absolute value as the basis for that direction, then apply to get the other.
+      // se resize: if dx > 0 or dy > 0, use the larger one's absolute value as basis.
+      // sw resize: if dx < 0 or dy > 0, use the larger one's absolute value as basis.
+      // nw resize: if dx < 0 or dy < 0, use the larger one's absolute value as basis.
+
+      let factorx = dx;
+      let factory = dy;
+
+      switch (dragType) {
+        case 'resize-n':
+        case 'resize-s':
+          // N/S movement has no dx component.
+          // dx = Math.abs(Math.floor((dy * self.aspectX) / self.aspectY));
+          dx = 0;
+          break;
+        case 'resize-e':
+        case 'resize-w':
+          // E/W movement has no dy component.
+          //   dy =
+          //     Math.floor((dx * self.aspectY) / self.aspectX) *
+          //     (dragType === 'resize-e' ? -1 : 1);
+          dy = 0;
+          break;
+        case 'resize-ne':
+          factorx = Math.abs(dx);
+          factory = Math.abs(dy);
+          if (factorx > factory) {
+            factorx *= Math.sign(dx);
+            factory = -Math.floor((factorx * self.aspectY) / self.aspectX);
+          } else {
+            factory *= Math.sign(dy);
+            factorx = -Math.floor((factory * self.aspectX) / self.aspectY);
+          }
+          dx = factorx;
+          dy = factory;
+          break;
+        case 'resize-se':
+          factorx = Math.abs(dx);
+          factory = Math.abs(dy);
+          if (factorx > factory) {
+            factorx *= Math.sign(dx);
+            factory = Math.floor((factorx * self.aspectY) / self.aspectX);
+          } else {
+            factory *= Math.sign(dy);
+            factorx = Math.floor((factory * self.aspectX) / self.aspectY);
+          }
+          dx = factorx;
+          dy = factory;
+          break;
+        case 'resize-sw':
+          factorx = Math.abs(dx);
+          factory = Math.abs(dy);
+          if (factorx > factory) {
+            factorx *= Math.sign(dx);
+            factory = -Math.floor((factorx * self.aspectY) / self.aspectX);
+          } else {
+            factory *= Math.sign(dy);
+            factorx = -Math.floor((factory * self.aspectX) / self.aspectY);
+          }
+          dx = factorx;
+          dy = factory;
+          break;
+        case 'resize-nw':
+          factorx = Math.abs(dx);
+          factory = Math.abs(dy);
+          if (factorx > factory) {
+            factorx *= Math.sign(dx);
+            factory = Math.floor((factorx * self.aspectY) / self.aspectX);
+          } else {
+            factory *= Math.sign(dy);
+            factorx = Math.floor((factory * self.aspectX) / self.aspectY);
+          }
+          dx = factorx;
+          dy = factory;
+          break;
+      }
+    }
+
+    // Variables used for calculating the new position and size of the drag frame/
+    let origRight = self.frameX + self.frameWidth - 1,
+      newRight = self.frameX + self.frameWidth - 1;
+    let origTop = self.frameY,
+      newTop = self.frameY;
+    let origLeft = self.frameX,
+      newLeft = self.frameX;
+    let origBottom = self.frameY + self.frameHeight - 1,
+      newBottom = self.frameY + self.frameHeight - 1;
+    let origHeight = self.frameHeight,
+      newHeight = self.frameHeight; // As defaults, assume no change is performed.
+    let origWidth = self.frameWidth,
+      newWidth = self.frameWidth;
+    let stepsX: number;
+    let stepsX2: number;
+    let stepsY2: number;
+    let stepsY: number;
+    let py = self.frameY;
+    let px = self.frameX;
+    let maxX = self.containerEle.clientWidth - 1;
+    let maxY = self.containerEle.clientHeight - 1;
+    let spaceX: number;
+    let spaceY: number;
+    let spaceX2: number;
+    let spaceY2: number;
+
+    let result: FramePosition = {
+      Top: origTop,
+      Height: origHeight,
+      Left: origLeft,
+      Width: origWidth,
+    };
+
+    // Depending on the active handle's purpose, we either move the drag item, or we resize the drag frame in a certain
+    // direction.
+    if (dragType === 'move') {
+      // This is a simple move/drag operation. We apply the (dx,dy) offset to the frame's original position to move it, but
+      // we must be mindful of staying within the containing parent's space.
+      newTop = self.Clamp(
+        self.frameY + dy,
+        0,
+        self.containerEle.clientHeight - 1
+      );
+      newLeft = self.Clamp(
+        self.frameX + dx,
+        0,
+        self.containerEle.clientWidth - 1
+      );
+      newRight = newLeft + self.frameWidth - 1;
+      newBottom = newTop + self.frameHeight - 1;
+
+      // Now, we check constraints on the right and bottom. If either is out of frame, we adjust the left and top (respectively) to
+      // keep within frame.
+      if (newRight >= self.containerEle.clientWidth) {
+        newLeft += self.containerEle.clientWidth - 1 - newRight;
+      }
+      if (newBottom >= self.containerEle.clientHeight) {
+        newTop += self.containerEle.clientHeight - 1 - newBottom;
+      }
+
+      result = {
+        Left: newLeft,
+        Top: newTop,
+        Width: origWidth,
+        Height: origHeight,
+      };
+    } else {
+      // This is a resize event. Based on which handle has been dragged, we must expand the drag frame size as we move the handle,
+      // keeping a min and max size constraint in play (based on the drag directive's min size and parent container size). Also,
+      // if an aspect ratio has been imposed, we must pin the drag frame to this aspect ratio as we expand.
+      switch (dragType) {
+        case 'resize-ne':
+          if (dx === 0 && dy === 0) break;
+
+          result = self.CalculateFrameBoxForCornerHandles({
+            DX: dx,
+            DY: dy,
+            OrigHeight: origHeight,
+            OrigLeft: origLeft,
+            OrigTop: origTop,
+            OrigWidth: origWidth,
+            ParentHeight: self.containerEle.clientHeight,
+            ParentWidth: self.containerEle.clientWidth,
+            AspectX: self.aspectX,
+            AspectY: self.aspectY,
+          });
+
+          break;
+        case 'resize-se':
+          // Southeast expansion requires rotating by 90 degrees counter-clockwise, then rotating back.
+          if (dx === 0 && dy === 0) break;
+
+          result = self.CalculateFrameBoxForCornerHandles({
+            DX: dy, // Downward motion changes to rightward motion
+            DY: dx,
+            OrigHeight: origWidth,
+            OrigLeft: origTop,
+            OrigTop: self.containerEle.clientWidth - origLeft - origWidth,
+            OrigWidth: origHeight,
+            ParentHeight: self.containerEle.clientWidth,
+            ParentWidth: self.containerEle.clientHeight,
+            AspectX: self.aspectY,
+            AspectY: self.aspectX,
+          });
+
+          // The returned result must be rotated back 90 degrees counter-clockwise.
+          [result.Left, result.Top] = [
+            self.containerEle.clientWidth - result.Top - result.Height,
+            result.Left,
+          ];
+          [result.Width, result.Height] = [result.Height, result.Width];
+          break;
+        case 'resize-sw':
+          // Southwest expansion requires mirroring across both axes, then mirroring back.
+          if (dx === 0 && dy === 0) break;
+
+          result = self.CalculateFrameBoxForCornerHandles({
+            DX: -dx, // Leftward motion changes to rightward motion
+            DY: -dy, // Rightward motion changes to upward motion
+            OrigHeight: origHeight,
+            OrigLeft: self.containerEle.clientWidth - origWidth - origLeft + 1,
+            OrigTop: self.containerEle.clientHeight - origHeight - origTop + 1,
+            OrigWidth: origWidth,
+            ParentHeight: self.containerEle.clientHeight,
+            ParentWidth: self.containerEle.clientWidth,
+            AspectX: self.aspectX,
+            AspectY: self.aspectY,
+          });
+
+          // The returned result must be mirrored back.
+          [result.Left, result.Top] = [
+            self.containerEle.clientWidth - result.Width - result.Left,
+            self.containerEle.clientHeight - result.Height - result.Top,
+          ];
+          break;
+        case 'resize-nw':
+          // Northwest expansion requires rotating by 90 degrees clockwise, then rotating back.
+          if (dx === 0 && dy === 0) break;
+
+          result = self.CalculateFrameBoxForCornerHandles({
+            DX: -dy, // Upward motion changes to rightward motion
+            DY: dx,
+            OrigHeight: origWidth,
+            OrigWidth: origHeight,
+            OrigLeft: self.containerEle.clientHeight - origTop - origHeight,
+            OrigTop: origLeft,
+            ParentHeight: self.containerEle.clientWidth,
+            ParentWidth: self.containerEle.clientHeight,
+            AspectX: self.aspectY,
+            AspectY: self.aspectX,
+          });
+
+          // The returned result must be rotated back 90 degrees counter-clockwise.
+          [result.Left, result.Top] = [
+            result.Top,
+            self.containerEle.clientHeight - result.Left - result.Width,
+          ];
+          [result.Width, result.Height] = [result.Height, result.Width];
+          break;
+        case 'resize-e':
+          // If there is no adjustment in either direction, break immediately.
+          if (dx === 0 && dy === 0) break;
+
+          result = self.CalculateFrameBoxForCenterHandles({
+            DX: dx,
+            DY: dy,
+            OrigHeight: origHeight,
+            OrigLeft: origLeft,
+            OrigTop: origTop,
+            OrigWidth: origWidth,
+            ParentHeight: self.containerEle.clientHeight,
+            ParentWidth: self.containerEle.clientWidth,
+            AspectX: self.aspectX,
+            AspectY: self.aspectY,
+          });
+
+          break;
+        case 'resize-w':
+          // Reflect the problem E/W, use the solver, then reflect solution back out.
+          if (dx === 0 && dy === 0) break;
+
+          result = self.CalculateFrameBoxForCenterHandles({
+            DX: -dx,
+            DY: dy,
+            OrigHeight: origHeight,
+            OrigLeft: self.containerEle.clientWidth - origLeft - origWidth,
+            OrigTop: origTop,
+            OrigWidth: origWidth,
+            ParentHeight: self.containerEle.clientHeight,
+            ParentWidth: self.containerEle.clientWidth,
+            AspectX: self.aspectX,
+            AspectY: self.aspectY,
+          });
+
+          // The returned Left value now represents the new right edge of the frame, so we must calculate the proper left edge to place in the result.
+          result.Left =
+            self.containerEle.clientWidth - result.Left - result.Width;
+
+          break;
+        case 'resize-n':
+          // Rotate the problem 90 deg clockwise, then rotate solution back to the left.
+          if (dx === 0 && dy === 0) break;
+
+          result = self.CalculateFrameBoxForCenterHandles({
+            DX: -dy, // Upward motion changes to rightward motion
+            DY: dx,
+            OrigHeight: origWidth,
+            OrigLeft: self.containerEle.clientHeight - origTop - origHeight,
+            OrigTop: origLeft,
+            OrigWidth: origHeight,
+            ParentHeight: self.containerEle.clientWidth,
+            ParentWidth: self.containerEle.clientHeight,
+            AspectX: self.aspectY,
+            AspectY: self.aspectX,
+          });
+
+          // The returned result must be rotated back 90 degrees counter-clockwise.
+          [result.Left, result.Top] = [
+            result.Top,
+            self.containerEle.clientHeight - result.Left - result.Width,
+          ];
+          [result.Width, result.Height] = [result.Height, result.Width];
+          break;
+        case 'resize-s':
+          // Rotate the problem 90 deg counter-clockwise, then rotate solution back to the right.
+          if (dx === 0 && dy === 0) break;
+
+          result = self.CalculateFrameBoxForCenterHandles({
+            DX: dy, // Downward motion changes to rightward motion
+            DY: dx,
+            OrigHeight: origWidth,
+            OrigLeft: origTop,
+            OrigTop: self.containerEle.clientWidth - origLeft - origWidth,
+            OrigWidth: origHeight,
+            ParentHeight: self.containerEle.clientWidth,
+            ParentWidth: self.containerEle.clientHeight,
+            AspectX: self.aspectY,
+            AspectY: self.aspectX,
+          });
+
+          // The returned result must be rotated back 90 degrees counter-clockwise.
+          [result.Left, result.Top] = [
+            self.containerEle.clientWidth - result.Top - result.Height,
+            result.Left,
+          ];
+          [result.Width, result.Height] = [result.Height, result.Width];
+          break;
+      }
+    }
+
+    // Move and resize the drag frame accordingly.
+    self.frameEle.style.top = `${result.Top}px`;
+    self.frameEle.style.left = `${result.Left}px`;
+    self.frameEle.style.width = `${result.Width}px`;
+    self.frameEle.style.height = `${result.Height}px`;
+  }
+
+  // #endregion
+}
+
+interface FramePosition {
+  Top: number;
+  Left: number;
+  Width: number;
+  Height: number;
+}
+
+interface FrameProblem {
+  DX: number;
+  DY: number;
+  OrigTop: number;
+  OrigLeft: number;
+  OrigHeight: number;
+  OrigWidth: number;
+  ParentWidth: number;
+  ParentHeight: number;
+  AspectX: number;
+  AspectY: number;
 }

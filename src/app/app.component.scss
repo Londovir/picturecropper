@@ -1,7 +1,7 @@
 .outerbox {
   display: block;
   position: absolute;
-  width: 550px;
+  width: 350px;
   height: 500px;
   border: 2px solid black;
   left: 150px;
@@ -12,10 +12,10 @@
 .dragframe {
   box-sizing: border-box;
   position: absolute;
-  top: 10px;
-  left: 10px;
+  top: 100px;
+  left: 100px;
   width: 100px;
-  height: 100px;
+  height: 200px;
   border: 1px solid red;
   display: flex;
   flex-direction: row;
@@ -103,4 +103,13 @@ $drag-handle-size: 4px;
 
 .n-drag {
   cursor: n-resize;
+}
+
+.marker {
+  position: absolute;
+  border: 1px solid green;
+  top: 90px;
+  left: 200px;
+  width: 10px;
+  height: 10px;
 }

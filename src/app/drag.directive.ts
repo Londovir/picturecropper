@@ -74,6 +74,8 @@ export class DragDirective implements OnDestroy {
   private frameStart: FramePosition = {
     Left: 0,
     Top: 0,
+    CenterX: 0,
+    CenterY: 0,
     Right: 0,
     Bottom: 0,
     Width: 0,
@@ -82,6 +84,8 @@ export class DragDirective implements OnDestroy {
   private parentStart: FramePosition = {
     Left: 0,
     Top: 0,
+    CenterX: 0,
+    CenterY: 0,
     Right: 0,
     Bottom: 0,
     Width: 0,
@@ -103,7 +107,11 @@ export class DragDirective implements OnDestroy {
     this.frameStart = {
       Top: this.frameEle.offsetTop,
       Left: this.frameEle.offsetLeft,
-      Right: this.frameEle.offsetTop + this.frameEle.offsetWidth - 1,
+      CenterX:
+        (2 * this.frameEle.offsetTop + this.frameEle.offsetWidth - 1) / 2,
+      CenterY:
+        (2 * this.frameEle.offsetTop + this.frameEle.offsetHeight - 1) / 2,
+      Right: this.frameEle.offsetLeft + this.frameEle.offsetWidth - 1,
       Bottom: this.frameEle.offsetTop + this.frameEle.offsetHeight - 1,
       Width: this.frameEle.offsetWidth,
       Height: this.frameEle.offsetHeight,
@@ -221,18 +229,18 @@ export class DragDirective implements OnDestroy {
 
         if (stepsX < stepsY) {
           // The E/W axis runs out first. Max the expansion to that wall, then split out the equal expansion to the N/S axis.
-          newWidth = origWidth + spaceX + 1;
+          newWidth = origWidth + spaceX;
           newHeight = Math.floor((newWidth * self.aspectY) / self.aspectX);
           spaceY = Math.floor((spaceX * self.aspectY) / self.aspectX);
           stepsY = Math.floor(spaceY / 2);
           newTop = Math.max(origTop - stepsY, 0);
           if (newTop + newHeight > maxY) {
-            stepsY = newTop + newHeight - maxY - 1;
+            stepsY = newTop + newHeight - maxY;
             newTop -= stepsY;
           }
         } else {
           // The N/S axis runs out first. Max the expansion to both walls, then move the E axis the same amount.
-          newHeight = origHeight + spaceY + 1;
+          newHeight = origHeight + spaceY;
           newTop = 0;
           spaceX = Math.floor((spaceY * self.aspectX) / self.aspectY);
           newWidth = origWidth + spaceX;
@@ -244,7 +252,7 @@ export class DragDirective implements OnDestroy {
         stepsY = Math.floor(dy / 2);
         newTop = Math.max(origTop - stepsY, 0);
         if (newTop + newHeight > maxY) {
-          stepsY = newTop + newHeight - maxY - 1;
+          stepsY = newTop + newHeight - maxY;
           newTop -= stepsY;
         }
       }
@@ -360,6 +368,69 @@ export class DragDirective implements OnDestroy {
 
   // #endregion
 
+  // #region Clamp To Parent
+
+  ClampToParent(
+    frame: FramePosition,
+    parent: FramePosition,
+    sidesToClamp: number
+  ) {
+    // First, we need to clamp the horiz. axis.
+    if (frame.Left < 0) {
+      const dx = -frame.Left;
+      frame.Left += dx;
+
+      if (frame.Right < 0) {
+        frame.Right = 0;
+      }
+
+      sidesToClamp |= ClampDirection.CLAMP_LEFT;
+    }
+
+    if (frame.Right > parent.Width - 1) {
+      const dx = parent.Width - frame.Right;
+      frame.Right += dx;
+
+      if (frame.Left > parent.Width - 1) {
+        frame.Left = parent.Width - 1;
+      }
+
+      sidesToClamp |= ClampDirection.CLAMP_RIGHT;
+    }
+
+    // Now, clamp the vert. axis.
+    if (frame.Top < 0) {
+      const dy = -frame.Top;
+      frame.Top += dy;
+
+      if (frame.Bottom < 0) {
+        frame.Bottom = 0;
+      }
+
+      sidesToClamp |= ClampDirection.CLAMP_TOP;
+    }
+
+    if (frame.Bottom > parent.Height - 1) {
+      const dy = parent.Height - frame.Bottom;
+      frame.Bottom += dy;
+
+      if (frame.Top > parent.Height - 1) {
+        frame.Top = parent.Height - 1;
+      }
+
+      sidesToClamp |= ClampDirection.CLAMP_BOTTOM;
+    }
+
+    frame.Width = frame.Right - frame.Left;
+    frame.Height = frame.Bottom - frame.Top;
+    frame.CenterX = Math.floor((frame.Left + frame.Right) / 2);
+    frame.CenterY = Math.floor((frame.Top + frame.Bottom) / 2);
+
+    return sidesToClamp;
+  }
+
+  // #endregion
+
   // #region Setup Handlers
 
   SetupHandlers() {
@@ -423,8 +494,12 @@ export class DragDirective implements OnDestroy {
           self.frameStart = {
             Left: self.frameEle.offsetLeft,
             Top: self.frameEle.offsetTop,
-            Right: self.frameStart.Left + self.frameEle.offsetWidth - 1,
-            Bottom: self.frameStart.Top + self.frameEle.offsetHeight - 1,
+            CenterX:
+              (2 * self.frameStart.Left + self.frameEle.offsetWidth - 1) / 2,
+            CenterY:
+              (2 * self.frameStart.Top + self.frameEle.offsetHeight - 1) / 2,
+            Right: self.frameStart.Left + self.frameEle.offsetWidth,
+            Bottom: self.frameStart.Top + self.frameEle.offsetHeight,
             Width: self.frameEle.offsetWidth,
             Height: self.frameEle.offsetHeight,
           };
@@ -434,6 +509,8 @@ export class DragDirective implements OnDestroy {
           self.parentStart = {
             Top: parInfo.top,
             Left: parInfo.left,
+            CenterX: (parInfo.right + parInfo.left) / 2,
+            CenterY: (parInfo.bottom + parInfo.top) / 2,
             Right: parInfo.right,
             Bottom: parInfo.bottom,
             Width: self.containerEle.clientWidth,
@@ -483,6 +560,8 @@ export class DragDirective implements OnDestroy {
 
   HandleDragMove2(event: MouseEvent) {
     const self = this;
+    let resizeDirection: ResizeDirection = ResizeDirection.RESIZE_NONE;
+    let usedClamping: number = 0;
 
     if (!self._appDragParent || !self.ActiveHandle?.appDragHandle) return;
     const dragType = self.ActiveHandle?.appDragHandle || '';
@@ -511,8 +590,10 @@ export class DragDirective implements OnDestroy {
     let result: FramePosition = {
       Top: self.frameStart.Top,
       Left: self.frameStart.Left,
-      Bottom: self.frameStart.Top + self.frameStart.Height - 1,
-      Right: self.frameStart.Left + self.frameStart.Width - 1,
+      CenterX: (2 * self.frameStart.Left + self.frameStart.Width) / 2,
+      CenterY: (2 * self.frameStart.Top + self.frameStart.Height) / 2,
+      Bottom: self.frameStart.Top + self.frameStart.Height,
+      Right: self.frameStart.Left + self.frameStart.Width,
       Height: self.frameStart.Height,
       Width: self.frameStart.Width,
     };
@@ -522,10 +603,20 @@ export class DragDirective implements OnDestroy {
     if (dragType === 'move') {
       // This is a simple move/drag operation. We apply the (dx,dy) offset to the frame's original position to move it, but
       // we must be mindful of staying within the containing parent's space.
-      result.Top += dy;
-      result.Left += dx;
-      result.Bottom += dy;
-      result.Right += dx;
+      // result.Top += dy;
+      // result.Left += dx;
+      // result.Bottom += dy;
+      // result.Right += dx;
+      console.log(
+        `Old cen: (${result.CenterX}, ${result.CenterY}), move by dx = ${dx}, dy = ${dy}`
+      );
+      result.CenterX += dx;
+      result.CenterY += dy;
+
+      result.Top = Math.floor(result.CenterY - result.Height / 2);
+      result.Bottom = result.Top + result.Height;
+      result.Left = Math.floor(result.CenterX - result.Width / 2);
+      result.Right = result.Left + result.Width;
 
       // Constrain frame to be inside of the parent container.
       self.KeepFrameInsideParent(result, this.parentStart);
@@ -535,183 +626,185 @@ export class DragDirective implements OnDestroy {
       // if an aspect ratio has been imposed, we must pin the drag frame to this aspect ratio as we expand.
       switch (dragType) {
         case 'resize-ne':
+          resizeDirection = ResizeDirection.RESIZE_NORTHEAST;
           if (dx === 0 && dy === 0) break;
 
-          // result = self.CalculateFrameBoxForCornerHandles({
-          //   DX: dx,
-          //   DY: dy,
-          //   OrigHeight: origHeight,
-          //   OrigLeft: origLeft,
-          //   OrigTop: origTop,
-          //   OrigWidth: origWidth,
-          //   ParentHeight: self.containerEle.clientHeight,
-          //   ParentWidth: self.containerEle.clientWidth,
-          //   AspectX: self.aspectX,
-          //   AspectY: self.aspectY,
-          // });
-
+          result.Top += dy;
+          result.Right += dx;
           break;
         case 'resize-se':
           // Southeast expansion requires rotating by 90 degrees counter-clockwise, then rotating back.
+          resizeDirection = ResizeDirection.RESIZE_SOUTHEAST;
           if (dx === 0 && dy === 0) break;
 
-          // result = self.CalculateFrameBoxForCornerHandles({
-          //   DX: dy, // Downward motion changes to rightward motion
-          //   DY: dx,
-          //   OrigHeight: origWidth,
-          //   OrigLeft: origTop,
-          //   OrigTop: self.containerEle.clientWidth - origLeft - origWidth,
-          //   OrigWidth: origHeight,
-          //   ParentHeight: self.containerEle.clientWidth,
-          //   ParentWidth: self.containerEle.clientHeight,
-          //   AspectX: self.aspectY,
-          //   AspectY: self.aspectX,
-          // });
-
-          // // The returned result must be rotated back 90 degrees counter-clockwise.
-          // [result.Left, result.Top] = [
-          //   self.containerEle.clientWidth - result.Top - result.Height,
-          //   result.Left,
-          // ];
-          // [result.Width, result.Height] = [result.Height, result.Width];
+          result.Bottom += dy;
+          result.Right += dx;
           break;
         case 'resize-sw':
           // Southwest expansion requires mirroring across both axes, then mirroring back.
+          resizeDirection = ResizeDirection.RESIZE_SOUTHWEST;
           if (dx === 0 && dy === 0) break;
 
-          // result = self.CalculateFrameBoxForCornerHandles({
-          //   DX: -dx, // Leftward motion changes to rightward motion
-          //   DY: -dy, // Rightward motion changes to upward motion
-          //   OrigHeight: origHeight,
-          //   OrigLeft: self.containerEle.clientWidth - origWidth - origLeft + 1,
-          //   OrigTop: self.containerEle.clientHeight - origHeight - origTop + 1,
-          //   OrigWidth: origWidth,
-          //   ParentHeight: self.containerEle.clientHeight,
-          //   ParentWidth: self.containerEle.clientWidth,
-          //   AspectX: self.aspectX,
-          //   AspectY: self.aspectY,
-          // });
-
-          // // The returned result must be mirrored back.
-          // [result.Left, result.Top] = [
-          //   self.containerEle.clientWidth - result.Width - result.Left,
-          //   self.containerEle.clientHeight - result.Height - result.Top,
-          // ];
+          result.Left += dx;
+          result.Bottom += dy;
           break;
         case 'resize-nw':
           // Northwest expansion requires rotating by 90 degrees clockwise, then rotating back.
+          resizeDirection = ResizeDirection.RESIZE_NORTHWEST;
           if (dx === 0 && dy === 0) break;
 
-          // result = self.CalculateFrameBoxForCornerHandles({
-          //   DX: -dy, // Upward motion changes to rightward motion
-          //   DY: dx,
-          //   OrigHeight: origWidth,
-          //   OrigWidth: origHeight,
-          //   OrigLeft: self.containerEle.clientHeight - origTop - origHeight,
-          //   OrigTop: origLeft,
-          //   ParentHeight: self.containerEle.clientWidth,
-          //   ParentWidth: self.containerEle.clientHeight,
-          //   AspectX: self.aspectY,
-          //   AspectY: self.aspectX,
-          // });
-
-          // // The returned result must be rotated back 90 degrees counter-clockwise.
-          // [result.Left, result.Top] = [
-          //   result.Top,
-          //   self.containerEle.clientHeight - result.Left - result.Width,
-          // ];
-          // [result.Width, result.Height] = [result.Height, result.Width];
+          result.Left += dx;
+          result.Top += dy;
           break;
         case 'resize-e':
           // If there is no adjustment in either direction, break immediately.
+          resizeDirection = ResizeDirection.RESIZE_EAST;
           if (dx === 0 && dy === 0) break;
 
-          // result = self.CalculateFrameBoxForCenterHandles({
-          //   DX: dx,
-          //   DY: dy,
-          //   OrigHeight: origHeight,
-          //   OrigLeft: origLeft,
-          //   OrigTop: origTop,
-          //   OrigWidth: origWidth,
-          //   ParentHeight: self.containerEle.clientHeight,
-          //   ParentWidth: self.containerEle.clientWidth,
-          //   AspectX: self.aspectX,
-          //   AspectY: self.aspectY,
-          // });
-
+          result.Right += dx;
           break;
         case 'resize-w':
           // Reflect the problem E/W, use the solver, then reflect solution back out.
+          resizeDirection = ResizeDirection.RESIZE_WEST;
           if (dx === 0 && dy === 0) break;
 
-          // result = self.CalculateFrameBoxForCenterHandles({
-          //   DX: -dx,
-          //   DY: dy,
-          //   OrigHeight: origHeight,
-          //   OrigLeft: self.containerEle.clientWidth - origLeft - origWidth,
-          //   OrigTop: origTop,
-          //   OrigWidth: origWidth,
-          //   ParentHeight: self.containerEle.clientHeight,
-          //   ParentWidth: self.containerEle.clientWidth,
-          //   AspectX: self.aspectX,
-          //   AspectY: self.aspectY,
-          // });
-
-          // // The returned Left value now represents the new right edge of the frame, so we must calculate the proper left edge to place in the result.
-          // result.Left =
-          //   self.containerEle.clientWidth - result.Left - result.Width;
+          result.Left += dx;
 
           break;
         case 'resize-n':
           // Rotate the problem 90 deg clockwise, then rotate solution back to the left.
+          resizeDirection = ResizeDirection.RESIZE_NORTH;
           if (dx === 0 && dy === 0) break;
 
-          // result = self.CalculateFrameBoxForCenterHandles({
-          //   DX: -dy, // Upward motion changes to rightward motion
-          //   DY: dx,
-          //   OrigHeight: origWidth,
-          //   OrigLeft: self.containerEle.clientHeight - origTop - origHeight,
-          //   OrigTop: origLeft,
-          //   OrigWidth: origHeight,
-          //   ParentHeight: self.containerEle.clientWidth,
-          //   ParentWidth: self.containerEle.clientHeight,
-          //   AspectX: self.aspectY,
-          //   AspectY: self.aspectX,
-          // });
+          result.Top += dy;
 
-          // // The returned result must be rotated back 90 degrees counter-clockwise.
-          // [result.Left, result.Top] = [
-          //   result.Top,
-          //   self.containerEle.clientHeight - result.Left - result.Width,
-          // ];
-          // [result.Width, result.Height] = [result.Height, result.Width];
           break;
         case 'resize-s':
           // Rotate the problem 90 deg counter-clockwise, then rotate solution back to the right.
+          resizeDirection = ResizeDirection.RESIZE_SOUTH;
           if (dx === 0 && dy === 0) break;
 
-          // result = self.CalculateFrameBoxForCenterHandles({
-          //   DX: dy, // Downward motion changes to rightward motion
-          //   DY: dx,
-          //   OrigHeight: origWidth,
-          //   OrigLeft: origTop,
-          //   OrigTop: self.containerEle.clientWidth - origLeft - origWidth,
-          //   OrigWidth: origHeight,
-          //   ParentHeight: self.containerEle.clientWidth,
-          //   ParentWidth: self.containerEle.clientHeight,
-          //   AspectX: self.aspectY,
-          //   AspectY: self.aspectX,
-          // });
+          result.Bottom += dy;
 
-          // // The returned result must be rotated back 90 degrees counter-clockwise.
-          // [result.Left, result.Top] = [
-          //   self.containerEle.clientWidth - result.Top - result.Height,
-          //   result.Left,
-          // ];
-          // [result.Width, result.Height] = [result.Height, result.Width];
           break;
       }
+
+      result.Width = result.Right - result.Left;
+      result.Height = result.Bottom - result.Top;
+
+      // Are we too small? If so, clamp at the min size allowed. If aspect locked, adjust as needed.
+      if (result.Width < self.appDragMinWidth) {
+        console.log('case 1');
+        result.Width = self.appDragMinWidth;
+        if (
+          ![
+            ResizeDirection.RESIZE_NORTHEAST,
+            ResizeDirection.RESIZE_SOUTHEAST,
+            ResizeDirection.RESIZE_EAST,
+          ].includes(resizeDirection)
+        ) {
+          result.Left = result.Right - self.appDragMinWidth;
+        }
+        if (self.aspectLocked) {
+          result.Height = (result.Width * self.aspectY) / self.aspectX;
+          if (
+            resizeDirection === ResizeDirection.RESIZE_EAST ||
+            resizeDirection == ResizeDirection.RESIZE_WEST
+          ) {
+            result.Top = Math.floor(result.CenterY - result.Height / 2);
+          } else if (
+            resizeDirection === ResizeDirection.RESIZE_NORTHEAST ||
+            resizeDirection === ResizeDirection.RESIZE_NORTHWEST
+          ) {
+            result.Top = result.Bottom - result.Height;
+          } else {
+            result.Bottom = result.Top + result.Height;
+          }
+        }
+      } else if (result.Height < self.appDragMinHeight) {
+        console.log('case 2');
+        result.Height = self.appDragMinHeight;
+        if (
+          ![
+            ResizeDirection.RESIZE_NORTHEAST,
+            ResizeDirection.RESIZE_SOUTHEAST,
+            ResizeDirection.RESIZE_SOUTH,
+          ].includes(resizeDirection)
+        ) {
+          result.Top = result.Bottom - self.appDragMinHeight;
+        }
+        if (resizeDirection === ResizeDirection.RESIZE_NORTHEAST) {
+          result.Top = result.Bottom - result.Height;
+        } else {
+          result.Bottom = result.Top + result.Height;
+        }
+        if (self.aspectLocked) {
+          result.Width = (result.Height * self.aspectX) / self.aspectY;
+          if (
+            resizeDirection === ResizeDirection.RESIZE_NORTH ||
+            resizeDirection === ResizeDirection.RESIZE_SOUTH
+          ) {
+            result.Left = Math.floor(result.CenterX - result.Width / 2);
+          } else if (resizeDirection === ResizeDirection.RESIZE_SOUTHWEST) {
+            result.Left = result.Right - result.Width;
+          } else {
+            result.Right = result.Left + result.Width;
+          }
+        }
+      } else {
+        // If we are aspect locked, now we must adjust the dimensions to maintain aspect.
+        if (self.aspectLocked) {
+          self.MaintainAspectRatio(
+            result,
+            this.parentStart,
+            resizeDirection,
+            usedClamping
+          );
+
+          if (result.Right - result.Left !== result.Width) {
+            console.log(
+              'Mismatch in dimensions: ',
+              JSON.parse(JSON.stringify(result))
+            );
+          }
+
+          // This adjustment may have moved something out of the parent container. Thus, we clamp again to ensure it is fit.
+          usedClamping = self.ClampToParent(
+            result,
+            this.parentStart,
+            usedClamping
+          );
+
+          if (result.Right - result.Left !== result.Width) {
+            console.log(
+              'Mismatch in dimensions 2: ',
+              JSON.parse(JSON.stringify(result))
+            );
+          }
+
+          console.log('Clamping is now: ', usedClamping);
+          console.log('event x = ' + event.clientX);
+
+          // And the clamp may, too, have messed up the aspect ratio when it shrank or expanded to fit the parent, so apply the maintainance one last time.
+          self.MaintainAspectRatio(
+            result,
+            this.parentStart,
+            resizeDirection,
+            usedClamping
+          );
+
+          if (result.Right - result.Left !== result.Width) {
+            console.log(
+              'Mismatch in dimensions 3: ',
+              JSON.parse(JSON.stringify(result))
+            );
+          }
+        }
+      }
     }
+
+    result.CenterX = (result.Left + result.Right) / 2;
+    result.CenterY = (result.Top + result.Bottom) / 2;
 
     // Move and resize the drag frame accordingly.
     self.frameEle.style.top = `${result.Top}px`;
@@ -720,20 +813,24 @@ export class DragDirective implements OnDestroy {
     self.frameEle.style.height = `${result.Height}px`;
 
     // Update our tracking variables.
-    self.frameStart = {
-      Top: result.Top,
-      Left: result.Left,
-      Right: result.Right,
-      Bottom: result.Bottom,
-      Width: result.Width,
-      Height: result.Height,
-    };
+    // self.frameStart = {
+    //   Top: result.Top,
+    //   Left: result.Left,
+    //   Right: result.Right,
+    //   Bottom: result.Bottom,
+    //   Width: result.Width,
+    //   Height: result.Height,
+    // };
 
-    // If the cursor position is outside of the drag zone, clamp it accordingly.
-    self.cursorStart = {
-      x: self.Clamp(event.clientX, this.dragZone.x1, this.dragZone.x2),
-      y: self.Clamp(event.clientY, this.dragZone.y1, this.dragZone.y2),
-    };
+    // If the cursor position is outside of the drag zone, clamp it accordingly if we are moving, else leave it alone.
+    if (dragType === 'move') {
+      // self.cursorStart = {
+      //   x: self.Clamp(event.clientX, this.dragZone.x1, this.dragZone.x2),
+      //   y: self.Clamp(event.clientY, this.dragZone.y1, this.dragZone.y2),
+      // };
+    } else {
+      // self.cursorStart = { x: event.clientX, y: event.clientY };
+    }
   }
 
   // #endregion
@@ -753,7 +850,7 @@ export class DragDirective implements OnDestroy {
         frame.Right += dx;
       }
       if (frame.Right > parent.Width - 1) {
-        const dx = parent.Width - 1 - frame.Right;
+        const dx = parent.Width - frame.Right;
         frame.Left += dx;
         frame.Right += dx;
       }
@@ -771,11 +868,211 @@ export class DragDirective implements OnDestroy {
         frame.Bottom += dy;
       }
       if (frame.Bottom > parent.Height - 1) {
-        const dy = parent.Height - 1 - frame.Bottom;
+        const dy = parent.Height - frame.Bottom;
         frame.Top += dy;
         frame.Bottom += dy;
       }
     }
+
+    frame.CenterX = Math.floor((frame.Left + frame.Right) / 2);
+    frame.CenterY = Math.floor((frame.Top + frame.Bottom) / 2);
+  }
+
+  // #endregion
+
+  // #region Maintain Aspect Ratio
+
+  MaintainAspectRatio(
+    frame: FramePosition,
+    parent: FramePosition,
+    resizeDirection: ResizeDirection | null,
+    usedClamping: number
+  ) {
+    const self = this;
+
+    // Calculate the current aspect ratio and the desired one.
+    const currentAspect = frame.Width / frame.Height;
+    const desiredAspect = self.aspectX / self.aspectY;
+
+    // If the current and desired aspect rations are sufficiently close numerically, leave it alone.
+    if (Math.abs(currentAspect - desiredAspect) <= 1e-4) return;
+    let sideToMove: SideAdjust = SideAdjust.SIDE_NONE;
+
+    if (currentAspect > desiredAspect) {
+      console.log(
+        `case 1: frame top = ${frame.Top}, left = ${frame.Left}, right = ${frame.Right}, bottom = ${frame.Bottom}, width = ${frame.Width}, height = ${frame.Height}`
+      );
+      // The current sizing has the width be too much. If the top or bottom (as appropriate) are not clamped, we can simply
+      // resize the height in that direction until the height brings the current aspect ratio back into alignment. Otherwise, we
+      // opt to reduce the width by moving in the left or right (as appropriate) instead.
+      switch (resizeDirection) {
+        case ResizeDirection.RESIZE_NORTHWEST:
+          if (!(usedClamping & ClampDirection.CLAMP_TOP)) {
+            sideToMove = SideAdjust.SIDE_TOP;
+          } else {
+            sideToMove = SideAdjust.SIDE_LEFT;
+          }
+          break;
+        case ResizeDirection.RESIZE_NORTH:
+        case ResizeDirection.RESIZE_SOUTH:
+          sideToMove = SideAdjust.SIDE_LEFT_RIGHT_SAME;
+          break;
+        case ResizeDirection.RESIZE_NORTHEAST:
+          if (!(usedClamping & ClampDirection.CLAMP_TOP)) {
+            sideToMove = SideAdjust.SIDE_TOP;
+          } else {
+            sideToMove = SideAdjust.SIDE_RIGHT;
+          }
+          break;
+        case ResizeDirection.RESIZE_EAST:
+          if (
+            !(usedClamping & ClampDirection.CLAMP_TOP) &&
+            !(usedClamping & ClampDirection.CLAMP_BOTTOM)
+          ) {
+            sideToMove = SideAdjust.SIDE_TOP_BOTTOM_SAME;
+          } else {
+            sideToMove = SideAdjust.SIDE_RIGHT;
+          }
+          break;
+        case ResizeDirection.RESIZE_SOUTHEAST:
+          if (!(usedClamping & ClampDirection.CLAMP_BOTTOM)) {
+            sideToMove = SideAdjust.SIDE_BOTTOM;
+          } else {
+            sideToMove = SideAdjust.SIDE_RIGHT;
+          }
+          break;
+        case ResizeDirection.RESIZE_SOUTHWEST:
+          if (!(usedClamping & ClampDirection.CLAMP_BOTTOM)) {
+            sideToMove = SideAdjust.SIDE_BOTTOM;
+          } else {
+            sideToMove = SideAdjust.SIDE_LEFT;
+          }
+          break;
+        case ResizeDirection.RESIZE_WEST:
+          if (
+            !(usedClamping & ClampDirection.CLAMP_TOP) &&
+            !(usedClamping & ClampDirection.CLAMP_BOTTOM)
+          ) {
+            sideToMove = SideAdjust.SIDE_TOP_BOTTOM_SAME;
+          } else {
+            sideToMove = SideAdjust.SIDE_LEFT;
+          }
+          break;
+      }
+    } else {
+      console.log(
+        `case 2: frame top = ${frame.Top}, left = ${frame.Left}, right = ${frame.Right}, bottom = ${frame.Bottom}, width = ${frame.Width}, height = ${frame.Height}, centerx = ${frame.CenterX}, centery = ${frame.CenterY}`
+      );
+      // In this case the height is too much for the aspect ratio. If possible we will increase the width to account for
+      // this, but barring that we reduce the height.
+      switch (resizeDirection) {
+        case ResizeDirection.RESIZE_NORTHWEST:
+          if (!(usedClamping & ClampDirection.CLAMP_LEFT)) {
+            sideToMove = SideAdjust.SIDE_LEFT;
+          } else {
+            sideToMove = SideAdjust.SIDE_TOP;
+          }
+          break;
+        case ResizeDirection.RESIZE_NORTH:
+          if (
+            !(usedClamping & ClampDirection.CLAMP_LEFT) &&
+            !(usedClamping & ClampDirection.CLAMP_RIGHT)
+          ) {
+            sideToMove = SideAdjust.SIDE_LEFT_RIGHT_SAME;
+          } else {
+            sideToMove = SideAdjust.SIDE_TOP;
+          }
+          break;
+        case ResizeDirection.RESIZE_NORTHEAST:
+          if (!(usedClamping & ClampDirection.CLAMP_RIGHT)) {
+            sideToMove = SideAdjust.SIDE_RIGHT;
+          } else {
+            sideToMove = SideAdjust.SIDE_TOP;
+          }
+          break;
+        case ResizeDirection.RESIZE_EAST:
+        case ResizeDirection.RESIZE_WEST:
+          sideToMove = SideAdjust.SIDE_TOP_BOTTOM_SAME;
+          break;
+        case ResizeDirection.RESIZE_SOUTHEAST:
+          if (!(usedClamping & ClampDirection.CLAMP_RIGHT)) {
+            sideToMove = SideAdjust.SIDE_RIGHT;
+          } else {
+            sideToMove = SideAdjust.SIDE_BOTTOM;
+          }
+          break;
+        case ResizeDirection.RESIZE_SOUTH:
+          if (
+            !(usedClamping & ClampDirection.CLAMP_LEFT) &&
+            !(usedClamping & ClampDirection.CLAMP_RIGHT)
+          ) {
+            sideToMove = SideAdjust.SIDE_LEFT_RIGHT_SAME;
+          } else {
+            sideToMove = SideAdjust.SIDE_BOTTOM;
+          }
+          break;
+        case ResizeDirection.RESIZE_SOUTHWEST:
+          if (!(usedClamping & ClampDirection.CLAMP_LEFT)) {
+            sideToMove = SideAdjust.SIDE_LEFT;
+          } else {
+            sideToMove = SideAdjust.SIDE_BOTTOM;
+          }
+          break;
+      }
+    }
+
+    // Now that we have a direction in mind, resize as needed in that direction.
+    switch (sideToMove) {
+      case SideAdjust.SIDE_NONE:
+        break;
+      case SideAdjust.SIDE_TOP:
+        frame.Top = frame.Bottom - frame.Width / desiredAspect;
+        break;
+      case SideAdjust.SIDE_RIGHT:
+        frame.Right = frame.Left + frame.Height * desiredAspect;
+        break;
+      case SideAdjust.SIDE_BOTTOM:
+        frame.Bottom = frame.Top + frame.Width / desiredAspect;
+        break;
+      case SideAdjust.SIDE_LEFT:
+        frame.Left = frame.Right - frame.Height * desiredAspect;
+        break;
+      case SideAdjust.SIDE_TOP_BOTTOM_SAME:
+        console.log('clamping: ', usedClamping);
+        let newHeight = frame.Width / desiredAspect;
+        if (
+          usedClamping & ClampDirection.CLAMP_TOP &&
+          !(usedClamping & ClampDirection.CLAMP_BOTTOM)
+        ) {
+          console.log('clamp top');
+          frame.Top = 0;
+          frame.Bottom = newHeight;
+        } else if (
+          usedClamping & ClampDirection.CLAMP_BOTTOM &&
+          !(usedClamping & ClampDirection.CLAMP_TOP)
+        ) {
+          frame.Bottom = parent.Height;
+          frame.Top = frame.Bottom - newHeight;
+        } else {
+          frame.Top = frame.CenterY - newHeight / 2;
+          frame.Bottom = frame.Top + newHeight;
+        }
+        break;
+      case SideAdjust.SIDE_LEFT_RIGHT_SAME:
+        let newWidth = frame.Height * desiredAspect;
+        frame.Left = frame.CenterX - newWidth / 2;
+        frame.Right = frame.Left + newWidth;
+        break;
+    }
+
+    frame.Height = frame.Bottom - frame.Top;
+    frame.Width = frame.Right - frame.Left;
+    frame.CenterX = Math.floor((frame.Left + frame.Right) / 2);
+    frame.CenterY = Math.floor((frame.Top + frame.Bottom) / 2);
+
+    console.log(
+      `adjusted frame left = ${frame.Left}, frame right = ${frame.Right}, top = ${frame.Top}, bottom = ${frame.Bottom}, height: ${frame.Height}, width: ${frame.Width}`
+    );
   }
 
   // #endregion
@@ -798,6 +1095,8 @@ interface FramePosition {
   Left: number;
   Right: number;
   Bottom: number;
+  CenterX: number;
+  CenterY: number;
   Width: number;
   Height: number;
 }
@@ -813,4 +1112,33 @@ interface FrameProblem {
   ParentHeight: number;
   AspectX: number;
   AspectY: number;
+}
+
+enum ResizeDirection {
+  RESIZE_NONE,
+  RESIZE_NORTHWEST,
+  RESIZE_NORTH,
+  RESIZE_NORTHEAST,
+  RESIZE_EAST,
+  RESIZE_SOUTHEAST,
+  RESIZE_SOUTH,
+  RESIZE_SOUTHWEST,
+  RESIZE_WEST,
+}
+
+enum ClampDirection {
+  CLAMP_TOP = 1,
+  CLAMP_RIGHT = 2,
+  CLAMP_BOTTOM = 4,
+  CLAMP_LEFT = 8,
+}
+
+enum SideAdjust {
+  SIDE_NONE = 0,
+  SIDE_TOP = 1,
+  SIDE_RIGHT = 2,
+  SIDE_BOTTOM = 4,
+  SIDE_LEFT = 8,
+  SIDE_TOP_BOTTOM_SAME = 16,
+  SIDE_LEFT_RIGHT_SAME = 32,
 }

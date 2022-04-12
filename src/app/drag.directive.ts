@@ -68,6 +68,23 @@ export class DragDirective implements OnDestroy {
   ActiveHandle: DragHandleDirective | null = null;
 
   // Properties used in the drag/resize operation.
+  private x1: number;
+  private y1: number;
+  private x2: number;
+  private y2: number;
+  private x1_int: number;
+  private y1_int: number;
+  private width_int: number;
+  private height_int: number;
+  private lastx: number;
+  private lasty: number;
+  private x: number;
+  private y: number;
+  private width: number;
+  private height: number;
+  private aspect_numerator: number;
+  private aspect_denominator: number;
+
   private frameRect: DOMRect;
   private containerRect: DOMRect;
   private dragZone: Rectangle = { x1: 0, y1: 0, x2: 0, y2: 0 };
@@ -482,57 +499,158 @@ export class DragDirective implements OnDestroy {
           // Capture which handle is active now.
           self.ActiveHandle = d.Handle ?? null;
 
-          // In order to measure the distance the mouse cursor has travelled during the drag/resize operation, we have to perform a little
-          // bit of math. We take the current mouse coords and subtract the initial coords of the drag handle when the drag operation starts.
-          // This will provide an offset that the drag handle has moved, which is also the amount we need to move the drag frame by.
-          // We begin by storing the current coords of the drag handle for use in these calculations. We also need to store the starting coords
-          // of the drag frame, which is what we use to determine its new positions during the drag.
-          self.cursorStart = {
-            x: d.Event?.clientX ?? 0,
-            y: d.Event?.clientY ?? 0,
-          };
-          self.frameStart = {
-            Left: self.frameEle.offsetLeft,
-            Top: self.frameEle.offsetTop,
-            CenterX:
-              (2 * self.frameStart.Left + self.frameEle.offsetWidth - 1) / 2,
-            CenterY:
-              (2 * self.frameStart.Top + self.frameEle.offsetHeight - 1) / 2,
-            Right: self.frameStart.Left + self.frameEle.offsetWidth,
-            Bottom: self.frameStart.Top + self.frameEle.offsetHeight,
-            Width: self.frameEle.offsetWidth,
-            Height: self.frameEle.offsetHeight,
-          };
+          this.rectangle_setup_snap_offsets (rectangle, coords);
+        this.widget_get_snap_offsets (widget, &snap_x, &snap_y, NULL, NULL);
 
-          // Set parent info.
-          const parInfo = self.containerEle.getBoundingClientRect();
-          self.parentStart = {
-            Top: parInfo.top,
-            Left: parInfo.left,
-            CenterX: (parInfo.right + parInfo.left) / 2,
-            CenterY: (parInfo.bottom + parInfo.top) / 2,
-            Right: parInfo.right,
-            Bottom: parInfo.bottom,
-            Width: self.containerEle.clientWidth,
-            Height: self.containerEle.clientHeight,
-          };
+      let snapped_x = coords.x + snap_x;
+    let snapped_y = coords.y + snap_y;
 
-          // Set drag zone
-          const frameCx = self.frameStart.Width / 2;
-          const frameCy = self.frameStart.Height / 2;
-          self.dragZone = {
-            x1: self.parentStart.Left + frameCx - 1,
-            y1: self.parentStart.Top + frameCy - 1,
-            x2: self.parentStart.Right - frameCx + 1,
-            y2: self.parentStart.Bottom - frameCy + 1,
-          };
+  rectangle.lastx = snapped_x;
+  rectangle.lasty = snapped_y;
+
+  if (rectangle.function == ResizingFunction.CREATING)
+    {
+      /* Remember that this rectangle was created from scratch. */
+      rectangle.is_new = true;
+
+      rectangle.x1 = rectangle.x2 = snapped_x;
+      rectangle.y1 = rectangle.y2 = snapped_y;
+
+      /* Unless forced, created rectangles should not be started in
+       * narrow-mode
+       */
+      if (rectangle.force_narrow_mode)
+        rectangle.narrow_mode = TRUE;
+      else
+        rectangle.narrow_mode = FALSE;
+
+      /* If the rectangle is being modified we want the center on
+       * fixed_center to be at the center of the currently existing
+       * rectangle, otherwise we want the point where the user clicked
+       * to be the center on fixed_center.
+       */
+      rectangle.center_x_on_fixed_center = snapped_x;
+      rectangle.center_y_on_fixed_center = snapped_y;
+
+      /* When the user toggles modifier keys, we want to keep track of
+       * what coordinates the "other side" should have. If we are
+       * creating a rectangle, use the current mouse coordinates as
+       * the coordinate of the "other side", otherwise use the
+       * immediate "other side" for that.
+       */
+      rectangle.other_side_x = snapped_x;
+      rectangle.other_side_y = snapped_y;
+    }
+  else
+    {
+      /* This rectangle was not created from scratch. */
+      rectangle.is_new = FALSE;
+
+      rectangle.center_x_on_fixed_center = (rectangle.x1 + rectangle.x2) / 2;
+      rectangle.center_y_on_fixed_center = (rectangle.y1 + rectangle.y2) / 2;
+
+      // TODO: x and y passed by reference
+      const rectcoords = this.rectangle_get_other_side_coord (rectangle,
+                                                 other_side_x,
+                                                other_side_y);
+
+        rectangle.other_size_x = rectcoord.other_side_x;
+        rectangle.other_side_y = rectcoord.other_side_y;
+    }
+
+  this.rectangle_update_int_rect (rectangle);
+
+  /* Is the rectangle being rubber-banded? */
+  rectangle.rect_adjusting = this.rectangle_rect_adjusting_func (rectangle);
+
+  this.rectangle_changed (widget);
+
+  this.rectangle_update_status (rectangle);
+
         }),
         // Use switchMap to change over from working with mousedown observables to working with mousemove observables, so we
         // can track the progress of the mouse cursor as we're engaged in this drag/resize.
         switchMap(() =>
           $mousemove!.pipe(
             tap((event) => {
-              self.HandleDragMove2(event);
+              // self.HandleDragMove2(event);
+              this.rectangle_update_with_coord(rectangle, this.dragType, event.clientX, event.clientY);
+
+              this.rectangle_update_status(rectangle);
+
+              if (rectange.function === ResizingFunction.CREATING) {
+                let dx = event.clientX - rectangle.lastx;
+                let dy = event.clientY - rectangle.liasty;
+
+                /* When the user starts to move the cursor, set the current
+       * function to one of the corner-grabbed functions, depending on
+       * in what direction the user starts dragging the rectangle.
+       */
+      let rfunction: ResizingFunction;
+
+      if (dx < 0)
+        {
+          rfunction = (dy < 0 ?
+                      ResizingFunction.RESIZING_UPPER_LEFT :
+                      ResizingFunction.RESIZING_LOWER_LEFT);
+        }
+      else if (dx > 0)
+        {
+          rfunction = (dy < 0 ?
+                      ResizingFunction.RESIZING_UPPER_RIGHT :
+                      ResizingFunction.RESIZING_LOWER_RIGHT);
+        }
+      else if (dy < 0)
+        {
+          rfunction = (dx < 0 ?
+                      ResizingFunction.RESIZING_UPPER_LEFT :
+                      ResizingFunction.RESIZING_UPPER_RIGHT);
+        }
+      else if (dy > 0)
+        {
+          rfunction = (dx < 0 ?
+                      ResizingFunction.RESIZING_LOWER_LEFT :
+                      ResizingFunction.RESIZING_LOWER_RIGHT);
+        }
+
+        this.rectangle_set_function (rectangle, rfunction);
+
+        if (rectangle.fixed_rule_active &&
+          rectangle.fixed_rule == GIMP_RECTANGLE_FIXED_SIZE)
+        {
+          /* For fixed size, set the function to moving immediately since the
+           * rectangle can not be resized anyway.
+           */
+
+          /* We fake a coord update to get the right size. */
+          this.rectangle_update_with_coord (rectangle,
+                                                 event.clientX,
+                                                 event.clientY);
+
+          gimp_tool_widget_set_snap_offsets (widget,
+                                             -(private->x2 - private->x1) / 2,
+                                             -(private->y2 - private->y1) / 2,
+                                             private->x2 - private->x1,
+                                             private->y2 - private->y1);
+
+          gimp_tool_rectangle_set_function (rectangle,
+                                            GIMP_TOOL_RECTANGLE_MOVING);
+        }
+
+
+        rectangle_update_options (rectangle);
+
+  private->lastx = snapped_x;
+  private->lasty = snapped_y;
+
+
+
+
+              }
+
+
+
+
             }),
             takeUntil(
               $mouseup!.pipe(
@@ -1076,6 +1194,556 @@ export class DragDirective implements OnDestroy {
   }
 
   // #endregion
+
+  rectangle_recalculate_center_xy(result: Rectangle) {
+    result.center_x_on_fixed_center = (result.x1 + result.x2) / 2;
+    result.center_y_on_fixed_center = (result.y1 + result.y2) / 2;
+  }
+
+  rectangle_handle_general_clamping(result: Rectangle, dragType: string) {
+    const constraint = this.rectange_get_constraint(result);
+
+    if (constraint === RECTANGLE_CONSTRAIN_NONE) return;
+
+    if (dragType !== 'move') {
+      rectangle_clamp(result, null, constraint, this.fixed_center);
+    } else {
+      rectangle_keep_inside(result, constraint);
+    }
+  }
+
+  rectangle_apply_fixed_rule(result: Rectangle, dragType: string) {
+    const constraint = rectange_get_constraint(result);
+
+    const aspect = this.Clamp(
+      this.aspect_numerator / this.aspect_denominator,
+      1.0 / this.parentStart.Height,
+      this.parentStart.Width
+    ); // In GIMP, this is 1.0 / image_height, image_width
+
+    if (dragType !== 'move') {
+      let clamped_sides: ClampedSide = ClampedSide.CLAMPED_NONE;
+
+      rectange_apply_aspect(result, aspect, clamped_sides);
+
+      clamped_sides = rectangle_clamp(
+        result,
+        clamped_sides,
+        constraint,
+        this.fixed_center
+      );
+
+      rectangle_apply_aspect(result, aspect, clamped_sides);
+    } else {
+      rectangle_apply_aspect(result, aspect, ClampedSide.CLAMPED_NONE);
+
+      rectangle_keep_inside(result, constraint);
+    }
+  }
+
+  rectangle_update_with_coord(
+    rectangle: Rectangle,
+    dragType: string,
+    new_x: number,
+    new_y: number
+  ) {
+    this.rectangle_apply_coord(rectangle, new_x, new_y);
+
+    this.rectangle_handle_general_clamping(rectangle);
+
+    if (dragType !== 'move') {
+      this.rectangle_apply_fixed_rule(rectangle, dragType);
+    }
+
+    this.rectangle_update_int_rect(rectangle);
+  }
+
+  rectangle_apply_aspect(
+    rectangle: Rectangle,
+    aspect: number,
+    clamped_sides: number
+  ) {
+    let current_w: number;
+    let current_h: number;
+    let current_aspect: number;
+    let side_to_resize: SideToResize = SideToResize.SIDE_TO_RESIZE_NONE;
+
+    current_w = rectangle.x2 - rectangle.x1;
+    current_h = rectangle.y2 - rectangle.y1;
+
+    current_aspect = current_w / current_h;
+
+    /* Do we have to do anything? */
+    if (current_aspect - aspect < 1e-4) return;
+
+    if (current_aspect > aspect) {
+      /* We can safely pick LEFT or RIGHT, since using those sides
+       * will make the rectangle smaller, so we don't need to check
+       * for clamped_sides. We may only use TOP and BOTTOM if not
+       * those sides have been clamped, since using them will make the
+       * rectangle bigger.
+       */
+      switch (rectangle.function) {
+        case ResizingFunction.RESIZING_UPPER_LEFT:
+          if (!(clamped_sides & ClampedSide.CLAMPED_TOP))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_TOP;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_LEFT;
+          break;
+
+        case ResizingFunction.RESIZING_UPPER_RIGHT:
+          if (!(clamped_sides & ClampedSide.CLAMPED_TOP))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_TOP;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_RIGHT;
+          break;
+
+        case ResizingFunction.RESIZING_LOWER_LEFT:
+          if (!(clamped_sides & ClampedSide.CLAMPED_BOTTOM))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_BOTTOM;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_LEFT;
+          break;
+
+        case ResizingFunction.RESIZING_LOWER_RIGHT:
+          if (!(clamped_sides & ClampedSide.CLAMPED_BOTTOM))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_BOTTOM;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_RIGHT;
+          break;
+
+        case ResizingFunction.RESIZING_LEFT:
+          if (
+            !(clamped_sides & ClampedSide.CLAMPED_TOP) &&
+            !(clamped_sides & ClampedSide.CLAMPED_BOTTOM)
+          )
+            side_to_resize =
+              SideToResize.SIDE_TO_RESIZE_TOP_AND_BOTTOM_SYMMETRICALLY;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_LEFT;
+          break;
+
+        case ResizingFunction.RESIZING_RIGHT:
+          if (
+            !(clamped_sides & ClampedSide.CLAMPED_TOP) &&
+            !(clamped_sides & ClampedSide.CLAMPED_BOTTOM)
+          )
+            side_to_resize =
+              SideToResize.SIDE_TO_RESIZE_TOP_AND_BOTTOM_SYMMETRICALLY;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_RIGHT;
+          break;
+
+        case ResizingFunction.RESIZING_BOTTOM:
+        case ResizingFunction.RESIZING_TOP:
+          side_to_resize =
+            SideToResize.SIDE_TO_RESIZE_LEFT_AND_RIGHT_SYMMETRICALLY;
+          break;
+
+        case ResizingFunction.MOVING:
+        default:
+          if (!(clamped_sides & ClampedSide.CLAMPED_BOTTOM))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_BOTTOM;
+          else if (!(clamped_sides & ClampedSide.CLAMPED_RIGHT))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_RIGHT;
+          else if (!(clamped_sides & ClampedSide.CLAMPED_TOP))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_TOP;
+          else if (!(clamped_sides & ClampedSide.CLAMPED_LEFT))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_LEFT;
+          break;
+      }
+    } /* (current_aspect < aspect) */ else {
+      /* We can safely pick TOP or BOTTOM, since using those sides
+       * will make the rectangle smaller, so we don't need to check
+       * for clamped_sides. We may only use LEFT and RIGHT if not
+       * those sides have been clamped, since using them will make the
+       * rectangle bigger.
+       */
+      switch (rectangle.function) {
+        case ResizingFunction.RESIZING_UPPER_LEFT:
+          if (!(clamped_sides & ClampedSide.CLAMPED_LEFT))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_LEFT;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_TOP;
+          break;
+
+        case ResizingFunction.RESIZING_UPPER_RIGHT:
+          if (!(clamped_sides & ClampedSide.CLAMPED_RIGHT))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_RIGHT;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_TOP;
+          break;
+
+        case ResizingFunction.RESIZING_LOWER_LEFT:
+          if (!(clamped_sides & ClampedSide.CLAMPED_LEFT))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_LEFT;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_BOTTOM;
+          break;
+
+        case ResizingFunction.RESIZING_LOWER_RIGHT:
+          if (!(clamped_sides & ClampedSide.CLAMPED_RIGHT))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_RIGHT;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_BOTTOM;
+          break;
+
+        case ResizingFunction.RESIZING_TOP:
+          if (
+            !(clamped_sides & ClampedSide.CLAMPED_LEFT) &&
+            !(clamped_sides & ClampedSide.CLAMPED_RIGHT)
+          )
+            side_to_resize =
+              SideToResize.SIDE_TO_RESIZE_LEFT_AND_RIGHT_SYMMETRICALLY;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_TOP;
+          break;
+
+        case ResizingFunction.RESIZING_BOTTOM:
+          if (
+            !(clamped_sides & ClampedSide.CLAMPED_LEFT) &&
+            !(clamped_sides & ClampedSide.CLAMPED_RIGHT)
+          )
+            side_to_resize =
+              SideToResize.SIDE_TO_RESIZE_LEFT_AND_RIGHT_SYMMETRICALLY;
+          else side_to_resize = SideToResize.SIDE_TO_RESIZE_BOTTOM;
+          break;
+
+        case ResizingFunction.RESIZING_LEFT:
+        case ResizingFunction.RESIZING_RIGHT:
+          side_to_resize =
+            SideToResize.SIDE_TO_RESIZE_TOP_AND_BOTTOM_SYMMETRICALLY;
+          break;
+
+        case ResizingFunction.MOVING:
+        default:
+          if (!(clamped_sides & ClampedSide.CLAMPED_BOTTOM))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_BOTTOM;
+          else if (!(clamped_sides & ClampedSide.CLAMPED_RIGHT))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_RIGHT;
+          else if (!(clamped_sides & ClampedSide.CLAMPED_TOP))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_TOP;
+          else if (!(clamped_sides & ClampedSide.CLAMPED_LEFT))
+            side_to_resize = SideToResize.SIDE_TO_RESIZE_LEFT;
+          break;
+      }
+    }
+
+    /* We now know what side(s) we should resize, so now we just solve
+     * the aspect equation for that side(s).
+     */
+    switch (side_to_resize) {
+      case SideToResize.SIDE_TO_RESIZE_NONE:
+        return;
+
+      case SideToResize.SIDE_TO_RESIZE_LEFT:
+        rectangle.x1 = rectangle.x2 - aspect * current_h;
+        break;
+
+      case SideToResize.SIDE_TO_RESIZE_RIGHT:
+        rectangle.x2 = rectangle.x1 + aspect * current_h;
+        break;
+
+      case SideToResize.SIDE_TO_RESIZE_TOP:
+        rectangle.y1 = rectangle.y2 - current_w / aspect;
+        break;
+
+      case SideToResize.SIDE_TO_RESIZE_BOTTOM:
+        rectangle.y2 = rectangle.y1 + current_w / aspect;
+        break;
+
+      case SideToResize.SIDE_TO_RESIZE_TOP_AND_BOTTOM_SYMMETRICALLY:
+        {
+          const correct_h = current_w / aspect;
+
+          rectangle.y1 = rectangle.center_y_on_fixed_center - correct_h / 2;
+          rectangle.y2 = rectangle.y1 + correct_h;
+        }
+        break;
+
+      case SideToResize.SIDE_TO_RESIZE_LEFT_AND_RIGHT_SYMMETRICALLY:
+        {
+          const correct_w = current_h * aspect;
+
+          rectangle.x1 = rectangle.center_x_on_fixed_center - correct_w / 2;
+          rectangle.x2 = rectangle.x1 + correct_w;
+        }
+        break;
+    }
+  }
+
+  rectangle_keep_inside_vertically(
+    rectangle: Rectangle,
+    constraint: RectangleConstraint
+  ) {
+    let min_y;
+    let max_y;
+
+    if (constraint == CONSTRAIN_NONE) return;
+
+    const constraints = this.rectangle_get_constraints(
+      rectangle,
+      null,
+      min_y,
+      null,
+      max_y,
+      constraint
+    );
+
+    min_y = constraints.min_y;
+    max_y = constraints.max_y;
+
+    if (max_y - min_y < rectangle.y2 - rectangle.y1) {
+      rectangle.y1 = min_y;
+      rectangle.y2 = max_y;
+    } else {
+      if (rectangle.y1 < min_y) {
+        const dy = min_y - rectangle.y1;
+
+        rectangle.y1 += dy;
+        rectangle.y2 += dy;
+      }
+      if (rectangle.y2 > max_y) {
+        const dy = max_y - rectangle.y2;
+
+        rectangle.y1 += dy;
+        rectangle.y2 += dy;
+      }
+    }
+  }
+
+  rectangle_keep_inside_horizontally(
+    rectangle: Rectangle,
+    constraint: RectangleConstraint
+  ) {
+    let min_x;
+    let max_x;
+
+    if (constraint == CONSTRAIN_NONE) return;
+
+    const constraints = this.rectangle_get_constraints(
+      rectangle,
+      min_x,
+      null,
+      max_x,
+      null,
+      constraint
+    );
+
+    min_x = constraints.min_x;
+    max_x = constraints.max_x;
+
+    if (max_x - min_x < rectangle.x2 - rectangle.x1) {
+      rectangle.x1 = min_x;
+      rectangle.x2 = max_x;
+    } else {
+      if (rectangle.x1 < min_x) {
+        const dx = min_x - rectangle.x1;
+
+        rectangle.x1 += dx;
+        rectangle.x2 += dx;
+      }
+      if (rectangle.x2 > max_x) {
+        const dx = max_x - rectangle.x2;
+
+        rectangle.x1 += dx;
+        rectangle.x2 += dx;
+      }
+    }
+  }
+
+  rectangle_keep_inside(rectangle: Rectangle, constraint: RectangleConstraint) {
+    this.rectangle_keep_inside_horizontally(rectangle, constraint);
+    this.rectangle_keep_inside_vertically(rectangle, constraint);
+  }
+
+  rectangle_clamp_height(
+    rectangle: Rectangle,
+    clamped_sides: ClampedSide,
+    constraint: RectangleConstraint,
+    symmetrically: boolean
+  ) {
+    let min_y;
+    let max_y;
+
+    if (constraint == CONSTRAIN_NONE) return;
+
+    const constraints = this.rectangle_get_constraints(
+      rectangle,
+      null,
+      min_y,
+      null,
+      max_y,
+      constraint
+    );
+
+    min_y = constraints.min_y;
+    max_y = constraints.max_y;
+
+    if (rectangle.y1 < min_y) {
+      const dy = min_y - rectangle.y1;
+
+      rectangle.y1 += dy;
+
+      if (symmetrically) rectangle.y2 -= dy;
+
+      if (rectangle.y2 < min_y) rectangle.y2 = min_y;
+
+      if (clamped_sides) clamped_sides |= ClampedSide.CLAMPED_TOP;
+    }
+
+    if (rectangle.y2 > max_y) {
+      const dy = max_y - rectangle.y2;
+
+      rectangle.y2 += dy;
+
+      if (symmetrically) rectangle.y1 -= dy;
+
+      if (rectangle.y1 > max_y) rectangle.y1 = max_y;
+
+      if (clamped_sides) clamped_sides |= ClampedSide.CLAMPED_BOTTOM;
+    }
+
+    return clamped_sides;
+  }
+
+  rectangle_clamp_width(
+    rectangle: Rectangle,
+    clamped_sides: ClampedSide,
+    constraint: RectangleConstraint,
+    symmetrically: boolean
+  ) {
+    let min_x;
+    let max_x;
+
+    if (constraint == CONSTRAIN_NONE) return;
+
+    const constraints = this.rectangle_get_constraints(
+      rectangle,
+      min_x,
+      null,
+      max_x,
+      null,
+      constraint
+    );
+
+    min_x = constraints.min_x;
+    max_x = constraints.max_x;
+
+    if (rectangle.x1 < min_x) {
+      const dx = min_x - rectangle.x1;
+
+      rectangle.x1 += dx;
+
+      if (symmetrically) rectangle.x2 -= dx;
+
+      if (rectangle.x2 < min_x) rectangle.x2 = min_x;
+
+      if (clamped_sides) clamped_sides |= ClampedSide.CLAMPED_LEFT;
+    }
+
+    if (rectangle.x2 > max_x) {
+      const dx = max_x - rectangle.x2;
+
+      rectangle.x2 += dx;
+
+      if (symmetrically) rectangle.x1 -= dx;
+
+      if (rectangle.x1 > max_x) rectangle.x1 = max_x;
+
+      if (clamped_sides) clamped_sides |= ClampedSide.CLAMPED_RIGHT;
+    }
+
+    return clamped_sides;
+  }
+
+  rectangle_clamp(
+    rectangle: Rectangle,
+    clamped_sides: ClampedSide,
+    constraint: RectangleConstraint,
+    symmetrically: boolean
+  ) {
+    clamped_sides = this.rectangle_clamp_width(
+      rectangle,
+      clamped_sides,
+      constraint,
+      symmetrically
+    );
+
+    clamped_sides = this.rectangle_clamp_height(
+      rectangle,
+      clamped_sides,
+      constraint,
+      symmetrically
+    );
+
+    return clamped_sides;
+  }
+
+  rectangle_apply_coord (rectangle: Rectangle,
+                                 coord_x: number,
+                                 coord_y: number)
+{
+  if (rectangle.function == ResizingFunction.MOVING)
+    {
+      /* Preserve width and height while moving the grab-point to where the
+       * cursor is.
+       */
+      const w = rectangle.x2 - rectangle.x1;
+      const h = rectangle.y2 - rectangle.y1;
+
+      rectangle.x1 = coord_x;
+      rectangle.y1 = coord_y;
+
+      rectangle.x2 = rectangle.x1 + w;
+      rectangle.y2 = rectangle.y1 + h;
+
+      /* We are done already. */
+      return;
+    }
+
+  switch (rectangle.function)
+    {
+    case ResizingFunction.RESIZING_UPPER_LEFT:
+    case ResizingFunction.RESIZING_LOWER_LEFT:
+    case ResizingFunction.RESIZING_LEFT:
+      rectangle.x1 = coord_x;
+
+      if (rectangle.fixed_center)
+        rectangle.x2 = 2 * rectangle.center_x_on_fixed_center - rectangle.x1;
+
+      break;
+
+    case ResizingFunction.RESIZING_UPPER_RIGHT:
+    case ResizingFunction.RESIZING_LOWER_RIGHT:
+    case ResizingFunction.RESIZING_RIGHT:
+      rectangle.x2 = coord_x;
+
+      if (rectangle.fixed_center)
+        rectangle.x1 = 2 * rectangle.center_x_on_fixed_center - rectangle.x2;
+
+      break;
+
+    default:
+      break;
+    }
+
+  switch (rectangle.function)
+    {
+    case ResizingFunction.RESIZING_UPPER_LEFT:
+    case ResizingFunction.RESIZING_UPPER_RIGHT:
+    case ResizingFunction.RESIZING_TOP:
+      rectangle.y1 = coord_y;
+
+      if (rectangle.fixed_center)
+        rectangle.y2 = 2 * rectangle.center_y_on_fixed_center - rectangle.y1;
+
+      break;
+
+    case ResizingFunction.RESIZING_LOWER_LEFT:
+    case ResizingFunction.RESIZING_LOWER_RIGHT:
+    case ResizingFunction.RESIZING_BOTTOM:
+      rectangle.y2 = coord_y;
+
+      if (rectangle.fixed_center)
+        rectangle.y1 = 2 * rectangle.center_y_on_fixed_center - rectangle.y2;
+
+      break;
+
+    default:
+      break;
+    }
+}
+
 }
 
 interface CursorPosition {
@@ -1088,6 +1756,10 @@ interface Rectangle {
   y1: number;
   x2: number;
   y2: number;
+  center_x_on_fixed_center: number;
+  center_y_on_fixed_center: number;
+  function: ResizingFunction;
+  fixed_center: boolean;
 }
 
 interface FramePosition {
@@ -1114,31 +1786,33 @@ interface FrameProblem {
   AspectY: number;
 }
 
-enum ResizeDirection {
-  RESIZE_NONE,
-  RESIZE_NORTHWEST,
-  RESIZE_NORTH,
-  RESIZE_NORTHEAST,
-  RESIZE_EAST,
-  RESIZE_SOUTHEAST,
-  RESIZE_SOUTH,
-  RESIZE_SOUTHWEST,
-  RESIZE_WEST,
+enum ResizingFunction {
+  RESIZING_NONE,
+  RESIZING_LEFT,
+  RESIZING_RIGHT,
+  RESIZING_UPPER_LEFT,
+  RESIZING_UPPER_RIGHT,
+  RESIZING_LOWER_LEFT,
+  RESIZING_LOWER_RIGHT,
+  RESIZING_TOP,
+  RESIZING_BOTTOM,
+  MOVING,
 }
 
-enum ClampDirection {
-  CLAMP_TOP = 1,
-  CLAMP_RIGHT = 2,
-  CLAMP_BOTTOM = 4,
-  CLAMP_LEFT = 8,
+enum ClampedSide {
+  CLAMPED_NONE = 0,
+  CLAMPED_LEFT = 1 << 0,
+  CLAMPED_RIGHT = 1 << 1,
+  CLAMPED_TOP = 1 << 2,
+  CLAMPED_BOTTOM = 1 << 3,
 }
 
-enum SideAdjust {
-  SIDE_NONE = 0,
-  SIDE_TOP = 1,
-  SIDE_RIGHT = 2,
-  SIDE_BOTTOM = 4,
-  SIDE_LEFT = 8,
-  SIDE_TOP_BOTTOM_SAME = 16,
-  SIDE_LEFT_RIGHT_SAME = 32,
+enum SideToResize {
+  SIDE_TO_RESIZE_NONE,
+  SIDE_TO_RESIZE_LEFT,
+  SIDE_TO_RESIZE_RIGHT,
+  SIDE_TO_RESIZE_TOP,
+  SIDE_TO_RESIZE_BOTTOM,
+  SIDE_TO_RESIZE_LEFT_AND_RIGHT_SYMMETRICALLY,
+  SIDE_TO_RESIZE_TOP_AND_BOTTOM_SYMMETRICALLY,
 }

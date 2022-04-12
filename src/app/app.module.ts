@@ -7,17 +7,12 @@ import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
 
 import { MatIconModule } from '@angular/material/icon';
 
-import { DragDirective, DragHandleDirective } from './drag.directive';
+import { DragDirective, DragFrameDirective, DragHandleDirective, DragShadowDirective } from './drag.directive';
 
 @NgModule({
-  declarations: [AppComponent, DragDirective, DragHandleDirective],
-  imports: [
-    BrowserModule,
-    AppRoutingModule,
-    BrowserAnimationsModule,
-    MatIconModule,
-  ],
-  providers: [DragDirective, DragHandleDirective],
-  bootstrap: [AppComponent],
+    declarations: [AppComponent, DragDirective, DragHandleDirective, DragShadowDirective, DragFrameDirective],
+    imports: [BrowserModule, AppRoutingModule, BrowserAnimationsModule, MatIconModule],
+    providers: [DragDirective, DragHandleDirective, DragShadowDirective, DragFrameDirective],
+    bootstrap: [AppComponent],
 })
 export class AppModule {}

@@ -1,36 +1,38 @@
 .outerbox {
-  display: block;
-  position: absolute;
-  width: 350px;
-  height: 500px;
-  border: 2px solid black;
-  left: 150px;
-  top: 150px;
-  box-sizing: border-box;
+    display: block;
+    position: absolute;
+    width: 473px;
+    height: 700px;
+    border: 2px solid black;
+    left: 150px;
+    top: 150px;
+    box-sizing: border-box;
+    background-image: url('../assets/poster.jpg');
+    background-size: contain;
 }
 
 .dragframe {
-  box-sizing: border-box;
-  position: absolute;
-  top: 100px;
-  left: 100px;
-  width: 100px;
-  height: 200px;
-  border: 1px solid red;
-  display: flex;
-  flex-direction: row;
-  justify-content: center;
-  align-items: center;
+    box-sizing: border-box;
+    position: absolute;
+    top: 100px;
+    left: 100px;
+    width: 200px;
+    height: 200px;
+    border: 1px solid white;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
 }
 
 .center-drag {
-  .mat-icon {
-    color: black;
-    cursor: move;
-  }
+    .mat-icon {
+        color: white;
+        cursor: move;
+    }
 }
 
-$drag-handle-size: 4px;
+$drag-handle-size: 1px;
 
 .ne-drag,
 .se-drag,
@@ -40,76 +42,79 @@ $drag-handle-size: 4px;
 .e-drag,
 .s-drag,
 .w-drag {
-  position: absolute;
-  width: 15px;
-  height: 15px;
+    position: absolute;
+    border: $drag-handle-size solid white;
+    width: 15px;
+    height: 15px;
 }
 
 .ne-drag,
 .n-drag,
 .nw-drag {
-  border-top: $drag-handle-size solid red;
-  top: 0px;
+    top: 0px;
 }
 
 .ne-drag,
 .e-drag,
 .se-drag {
-  border-right: $drag-handle-size solid red;
-  right: 0px;
+    right: 0px;
 }
 
 .se-drag,
 .s-drag,
 .sw-drag {
-  border-bottom: $drag-handle-size solid red;
-  bottom: 0px;
+    bottom: 0px;
 }
 
 .sw-drag,
 .w-drag,
 .nw-drag {
-  border-left: $drag-handle-size solid red;
-  left: 0px;
+    left: 0px;
 }
 
 .ne-drag {
-  cursor: ne-resize;
+    cursor: ne-resize;
 }
 
 .e-drag {
-  cursor: e-resize;
+    cursor: e-resize;
 }
 
 .se-drag {
-  cursor: se-resize;
+    cursor: se-resize;
 }
 
 .s-drag {
-  cursor: s-resize;
+    cursor: s-resize;
 }
 
 .sw-drag {
-  cursor: sw-resize;
+    cursor: sw-resize;
 }
 
 .w-drag {
-  cursor: w-resize;
+    cursor: w-resize;
 }
 
 .nw-drag {
-  cursor: nw-resize;
+    cursor: nw-resize;
 }
 
 .n-drag {
-  cursor: n-resize;
+    cursor: n-resize;
 }
 
 .marker {
-  position: absolute;
-  border: 1px solid green;
-  top: 90px;
-  left: 200px;
-  width: 10px;
-  height: 10px;
+    position: absolute;
+    border: 1px solid green;
+    top: 90px;
+    left: 200px;
+    width: 10px;
+    height: 10px;
+}
+
+.shadow-layer {
+    display: block;
+    position: absolute;
+    border: 1px solid green;
 }

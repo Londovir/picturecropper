@@ -1,16 +1,19 @@
-<div class="outerbox" #dragBox>
-  <div class="marker"></div>
-  <div class="dragframe" app-drag [appDragParent]="dragBox">
-    <div class="center-drag" #test appDragHandle="move">
-      <mat-icon>open_with</mat-icon>
+<div class="outerbox" #dragBox app-drag>
+    <div class="dragframe" appDragFrame [appDragFrameParent]="dragBox">
+        <div class="center-drag" #test appDragHandle="move">
+            <mat-icon>open_with</mat-icon>
+        </div>
+        <div class="ne-drag" appDragHandle="resize-ne"></div>
+        <div class="se-drag" appDragHandle="resize-se"></div>
+        <div class="sw-drag" appDragHandle="resize-sw"></div>
+        <div class="nw-drag" appDragHandle="resize-nw"></div>
+        <div class="n-drag" appDragHandle="resize-n"></div>
+        <div class="e-drag" appDragHandle="resize-e"></div>
+        <div class="s-drag" appDragHandle="resize-s"></div>
+        <div class="w-drag" appDragHandle="resize-w"></div>
     </div>
-    <div class="ne-drag" appDragHandle="resize-ne"></div>
-    <div class="se-drag" appDragHandle="resize-se"></div>
-    <div class="sw-drag" appDragHandle="resize-sw"></div>
-    <div class="nw-drag" appDragHandle="resize-nw"></div>
-    <div class="n-drag" appDragHandle="resize-n"></div>
-    <div class="e-drag" appDragHandle="resize-e"></div>
-    <div class="s-drag" appDragHandle="resize-s"></div>
-    <div class="w-drag" appDragHandle="resize-w"></div>
-  </div>
+    <div appDragShadow="top"></div>
+    <div appDragShadow="left"></div>
+    <div appDragShadow="right"></div>
+    <div appDragShadow="bottom"></div>
 </div>

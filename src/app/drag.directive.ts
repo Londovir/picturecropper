@@ -1410,9 +1410,21 @@ export class DragDirective implements OnDestroy {
     private _appDragFrame: DragFrameDirective | null = null;
 
     // Properties that track the drag frame and the container of the draggable item.
+    private ContainerBox: FramePosition;
     private frameEle: HTMLElement | null = null;
 
-    constructor(private el: ElementRef) {}
+    constructor(private el: ElementRef) {
+        const bounds = (el.nativeElement as HTMLElement).getBoundingClientRect();
+
+        this.ContainerBox = {
+            x1: bounds.left,
+            y1: bounds.top,
+            x2: bounds.right,
+            y2: bounds.bottom,
+            width: bounds.width,
+            height: bounds.height,
+        } as FramePosition;
+    }
 
     ngAfterContentInit(): void {
         const self = this;
@@ -1433,6 +1445,54 @@ export class DragDirective implements OnDestroy {
             this.frameEle.style.width = `${rect.width}px`;
             this.frameEle.style.height = `${rect.height}px`;
         }
+
+        // If we have shadow layers, position them now properly inside of the parent container and around the drag frame.
+        this.ShadowLayers?.forEach((sl) => {
+            const slEle = sl.ele.nativeElement as HTMLDivElement;
+
+            switch (sl.appDragShadow) {
+                case 'top':
+                    // Top shadow. Only apply if the drag frame is lower than the top of the container.
+                    if (rect.y > 0) {
+                        // Move shadow layer to cover above the drag frame.
+                        slEle.style.top = '0';
+                        slEle.style.left = '0';
+                        slEle.style.width = `${this.ContainerBox.width}px`;
+                        slEle.style.height = `${rect.y}px`;
+                    }
+                    break;
+                case 'bottom':
+                    // Bottom shadow. Only apply if the drag frame is higher than the bottom of the container.
+                    if (rect.y < this.ContainerBox.height) {
+                        // Move shadow layer to cover below the drag frame.
+                        slEle.style.bottom = '0';
+                        slEle.style.left = '0';
+                        slEle.style.width = `${this.ContainerBox.width}px`;
+                        slEle.style.height = `${this.ContainerBox.height - rect.y - rect.height}px`;
+                    }
+                    break;
+                case 'left':
+                    // Left shadow. Only apply if the drag frame is to the right of the left side of the container.
+                    if (rect.x > 0) {
+                        // Move shadow layer to cover to the left the drag frame.
+                        slEle.style.left = '0';
+                        slEle.style.top = `${rect.y}px`;
+                        slEle.style.width = `${rect.x - 1}px`;
+                        slEle.style.height = `${rect.height}px`;
+                    }
+                    break;
+                case 'right':
+                    // Right shadow. Only apply if the drag frame is to the left of the right side of the container.
+                    if (rect.x < this.ContainerBox.width) {
+                        // Move shadow layer to cover to the right the drag frame.
+                        slEle.style.right = '0';
+                        slEle.style.top = `${rect.y}px`;
+                        slEle.style.width = `${this.ContainerBox.width - rect.x - rect.width}px`;
+                        slEle.style.height = `${rect.height}px`;
+                    }
+                    break;
+            }
+        });
     }
 
     // #endregion

@@ -668,6 +668,28 @@ export class DragFrameDirective implements AfterContentInit, OnDestroy {
 
     // #endregion
 
+    // #region Get Cropped Region
+
+    GetCroppedRegion() {
+        // Translate coords from viewport to relative coords to container parent.
+        let top = this.rectangle.y1 - this.ContainerBox.y1 - this.ContainerBox.topBorder;
+        let left = this.rectangle.x1 - this.ContainerBox.x1 - this.ContainerBox.leftBorder;
+        let right = this.rectangle.x2 - this.ContainerBox.x1 - this.ContainerBox.leftBorder;
+        let bottom = this.rectangle.y2 - this.ContainerBox.y1 - this.ContainerBox.topBorder;
+
+        const cw = this.ContainerBox.width - this.ContainerBox.leftBorder - this.ContainerBox.rightBorder;
+        const ch = this.ContainerBox.height - this.ContainerBox.topBorder - this.ContainerBox.rightBorder;
+
+        return {
+            x1: left / cw,
+            y1: top / ch,
+            x2: right / cw,
+            y2: bottom / ch,
+        } as FramePosition;
+    }
+
+    // #endregion
+
     // #region Get Parent Container Boundaries
 
     GetParentContainerBoundaries(constraint: RectangleConstraint) {
@@ -1396,7 +1418,7 @@ export class DragDirective implements OnDestroy {
 
         this.frameEle = (_df?.ele?.nativeElement ?? null) as HTMLElement | null;
 
-        if (this.frameEle) {
+        if (_df && this.frameEle) {
             // Subscribe to notifications from the drag frame that a resize/move event has happened.
             this.subrelease = _df?.appDragFrameResize.subscribe((val: SimpleRectangle) => {
                 // Move the UI drag frame according to the provided position info.
@@ -1414,27 +1436,45 @@ export class DragDirective implements OnDestroy {
     private frameEle: HTMLElement | null = null;
 
     constructor(private el: ElementRef) {
-        const bounds = (el.nativeElement as HTMLElement).getBoundingClientRect();
+        const ele = el.nativeElement as HTMLElement;
 
         this.ContainerBox = {
-            x1: bounds.left,
-            y1: bounds.top,
-            x2: bounds.right,
-            y2: bounds.bottom,
-            width: bounds.width,
-            height: bounds.height,
+            x1: 0,
+            y1: 0,
+            x2: ele.clientWidth - 1,
+            y2: ele.clientHeight - 1,
+            width: ele.clientWidth,
+            height: ele.clientHeight,
         } as FramePosition;
     }
 
     ngAfterContentInit(): void {
         const self = this;
 
-        console.log(this.ShadowLayers);
+        if (self.frameEle) {
+            const fStyle = getComputedStyle(self.frameEle);
+            const fL = parseFloat(fStyle.getPropertyValue('left'));
+            const fT = parseFloat(fStyle.getPropertyValue('top'));
+            const fW = parseFloat(fStyle.getPropertyValue('width'));
+            const fH = parseFloat(fStyle.getPropertyValue('height'));
+
+            self.RedrawFrameBox({ x: fL, y: fT, width: fW, height: fH });
+        }
     }
 
     ngOnDestroy(): void {
         this._subrelease?.unsubscribe();
     }
+
+    // #region Get Cropped Region
+
+    GetCroppedRegion() {
+        if (this.appDragFrame) {
+            return this.appDragFrame.GetCroppedRegion();
+        } else return null;
+    }
+
+    // #endregion
 
     // #region Redraw Frame Box
 
@@ -1455,40 +1495,56 @@ export class DragDirective implements OnDestroy {
                     // Top shadow. Only apply if the drag frame is lower than the top of the container.
                     if (rect.y > 0) {
                         // Move shadow layer to cover above the drag frame.
+                        slEle.style.display = 'block';
                         slEle.style.top = '0';
                         slEle.style.left = '0';
                         slEle.style.width = `${this.ContainerBox.width}px`;
                         slEle.style.height = `${rect.y}px`;
+                    } else {
+                        // Not needed - hide.
+                        slEle.style.display = 'none';
                     }
                     break;
                 case 'bottom':
                     // Bottom shadow. Only apply if the drag frame is higher than the bottom of the container.
-                    if (rect.y < this.ContainerBox.height) {
+                    if (rect.y + rect.height < this.ContainerBox.height) {
                         // Move shadow layer to cover below the drag frame.
+                        slEle.style.display = 'block';
                         slEle.style.bottom = '0';
                         slEle.style.left = '0';
                         slEle.style.width = `${this.ContainerBox.width}px`;
                         slEle.style.height = `${this.ContainerBox.height - rect.y - rect.height}px`;
+                    } else {
+                        // Not needed - hide.
+                        slEle.style.display = 'none';
                     }
                     break;
                 case 'left':
                     // Left shadow. Only apply if the drag frame is to the right of the left side of the container.
                     if (rect.x > 0) {
                         // Move shadow layer to cover to the left the drag frame.
+                        slEle.style.display = 'block';
                         slEle.style.left = '0';
                         slEle.style.top = `${rect.y}px`;
                         slEle.style.width = `${rect.x - 1}px`;
                         slEle.style.height = `${rect.height}px`;
+                    } else {
+                        // Not needed - hide.
+                        slEle.style.display = 'none';
                     }
                     break;
                 case 'right':
                     // Right shadow. Only apply if the drag frame is to the left of the right side of the container.
-                    if (rect.x < this.ContainerBox.width) {
+                    if (rect.x + rect.width < this.ContainerBox.width) {
                         // Move shadow layer to cover to the right the drag frame.
+                        slEle.style.display = 'block';
                         slEle.style.right = '0';
                         slEle.style.top = `${rect.y}px`;
                         slEle.style.width = `${this.ContainerBox.width - rect.x - rect.width}px`;
                         slEle.style.height = `${rect.height}px`;
+                    } else {
+                        // Not needed - hide.
+                        slEle.style.display = 'none';
                     }
                     break;
             }
